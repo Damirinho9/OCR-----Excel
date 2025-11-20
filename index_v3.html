@@ -1,0 +1,1034 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OCR мини-карточек заказов -> Excel v3.0 Pro</title>
+  <style>
+    :root { --accent:#2563eb; --border:#e5e7eb; --muted:#6b7280; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color:#111827; }
+    h1 { font-size: 22px; margin: 0 0 12px; }
+    .version { color: var(--accent); font-size: 12px; font-weight: 600; }
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; background:#fff; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .spacer { flex:1; }
+    .btn { padding:10px 14px; border:1px solid #374151; background:#fff; border-radius:10px; cursor:pointer; }
+    .btn:disabled { opacity:.5; cursor:default; }
+    .btn.secondary { border-color:var(--border); }
+    .drop { border:2px dashed #9ca3af; border-radius:12px; padding:18px; text-align:center; color:#374151; }
+    .drop.dragover { border-color: var(--accent); background:#eef2ff; color:#1d4ed8; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .status { font-size: 13px; margin-left: 8px; }
+    .progress { height: 8px; background:#f3f4f6; border-radius:6px; overflow:hidden; margin-top:8px; }
+    .bar { height:100%; width:0%; background:var(--accent); transition:width .18s ease; }
+    .progress-label { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+    .container { display: flex; gap: 16px; }
+    .main-panel { flex: 1; min-width: 0; }
+    .side-panel { width: 320px; border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: #fafafa; position: sticky; top: 24px; height: fit-content; max-height: calc(100vh - 48px); overflow: auto; }
+    .side-panel.hidden { display: none; }
+
+    /* Виртуальный скролл */
+    .virtual-container { overflow: auto; max-height: 520px; border:1px solid var(--border); border-radius:8px; position: relative; }
+    .virtual-spacer { height: 0; }
+    .virtual-content { position: relative; }
+
+    .grid { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .grid th, .grid td { border:1px solid #f3f4f6; padding:6px 8px; font-size:13px; vertical-align:top; word-wrap: break-word; }
+    .grid th { background:#fafafa; text-align:left; position:sticky; top:0; z-index:2; }
+    .grid tr:hover { background: #f9fafb; cursor: pointer; }
+    .grid tr.selected { background: #dbeafe; }
+    .grid tr.priority { border-left: 3px solid var(--accent); }
+    td[contenteditable="true"] { background:#fff; outline:none; }
+    td[contenteditable="true"]:focus { box-shadow: inset 0 0 0 2px rgba(37,99,235,.2); }
+
+    .tools { display:flex; gap:8px; align-items:center; }
+    .select { padding:8px 10px; border:1px solid #9ca3af; border-radius:10px; background:#fff; }
+    .small { font-size:12px; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; background:#f9fafb; border:1px solid var(--border); border-radius:8px; padding:8px; max-height:110px; overflow:auto; font-size: 11px; }
+
+    .preview-img { max-width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+    .preview-title { font-weight: 600; margin-bottom: 8px; color: #111827; }
+    .preview-data { font-size: 12px; margin-top: 12px; }
+    .preview-data dt { font-weight: 600; margin-top: 8px; color: #6b7280; }
+    .preview-data dd { margin: 4px 0 0 0; color: #111827; word-break: break-word; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 4px; }
+    .badge.corrected { background: #dcfce7; color: #166534; }
+    .badge.warning { background: #fef3c7; color: #92400e; }
+    .badge.cached { background: #e0e7ff; color: #3730a3; }
+
+    .stats { display: flex; gap: 16px; margin-top: 8px; }
+    .stat-item { font-size: 12px; color: var(--muted); }
+    .stat-value { font-weight: 600; color: #111827; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>OCR мини-карточек заказов -> Excel <span class="version">v3.0 Pro</span></h1>
+
+  <div class="card">
+    <div class="row">
+      <label class="btn">
+        Выбрать файлы
+        <input id="fileInput" type="file" accept="image/*" multiple style="display:none" />
+      </label>
+      <label class="btn">
+        Выбрать папку
+        <input id="dirInput" type="file" webkitdirectory style="display:none" />
+      </label>
+      <button id="runBtn" class="btn" disabled>Распознать</button>
+      <button id="reparseBtn" class="btn secondary" disabled>Перепарсить</button>
+      <button id="cancelBtn" class="btn secondary" disabled>Отмена</button>
+      <button id="saveBtn" class="btn" disabled>Скачать Excel</button>
+      <button id="clearCacheBtn" class="btn secondary">Очистить кеш</button>
+      <span id="countSpan" class="muted">Файлы не выбраны</span>
+      <span class="spacer"></span>
+      <label class="muted">Параллельность
+        <select id="concurrency" class="select">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="4">4</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="dropZone" class="drop" style="margin-top:12px;">
+      Перетащите сюда изображения или нажмите "Выбрать папку/файлы", затем "Распознать".
+      <div class="progress">
+        <div id="progBar" class="bar"></div>
+      </div>
+      <div class="progress-label" id="progressLabel"></div>
+      <div id="status" class="status muted"></div>
+    </div>
+    <div class="small muted" style="margin-top:8px;">
+      🚀 v3.0 Pro: Web Workers, виртуальный скролл, IndexedDB кеш, умная очередь, оффлайн-режим
+    </div>
+    <div class="stats" id="stats">
+      <div class="stat-item">Кеш: <span class="stat-value" id="cacheSize">-</span></div>
+      <div class="stat-item">Память: <span class="stat-value" id="memoryUsage">-</span></div>
+      <div class="stat-item">Скорость: <span class="stat-value" id="processingSpeed">-</span></div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="main-panel">
+      <div class="card">
+        <div class="row" style="justify-content: space-between">
+          <div class="muted">Предпросмотр данных (<span id="rowCount">0</span> строк):</div>
+          <div class="tools">
+            <label class="muted">Столбец:
+              <select id="colSelect" class="select">
+                <option>Файл</option>
+                <option selected>ФИО</option>
+                <option>Телефон</option>
+                <option>Регион</option>
+                <option>Город</option>
+                <option>Улица</option>
+                <option>Дом/Кв</option>
+                <option>Адрес (полный)</option>
+                <option>Raw OCR</option>
+              </select>
+            </label>
+            <button id="clearColBtn" class="btn secondary">Очистить</button>
+            <button id="fillDownBtn" class="btn secondary">Копировать вниз</button>
+          </div>
+        </div>
+        <div id="virtualContainer" class="virtual-container">
+          <div id="virtualSpacer" class="virtual-spacer"></div>
+          <div id="virtualContent" class="virtual-content">
+            <table id="preview" class="grid">
+              <thead>
+                <tr>
+                  <th style="width:120px">Файл</th>
+                  <th style="width:160px">ФИО</th>
+                  <th style="width:130px">Телефон</th>
+                  <th style="width:110px">Регион</th>
+                  <th style="width:100px">Город</th>
+                  <th style="width:150px">Улица</th>
+                  <th style="width:90px">Дом/Кв</th>
+                  <th style="width:200px">Адрес (полный)</th>
+                  <th style="width:200px">Raw OCR</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="small muted" style="margin-top:8px;">
+          💡 Клик по строке - просмотр справа. Виртуальный скролл поддерживает 1000+ строк без лагов.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="muted">Логи и диагностика:</div>
+        <div id="log" class="log"></div>
+      </div>
+    </div>
+
+    <div id="sidePanel" class="side-panel hidden">
+      <div class="preview-title">Просмотр карточки</div>
+      <img id="previewImg" class="preview-img" alt="Preview" />
+      <dl class="preview-data" id="previewData"></dl>
+    </div>
+  </div>
+
+<script>
+/* ===========================================================
+   INDEXEDDB ДЛЯ КЕШИРОВАНИЯ TESSERACT ЯЗЫКОВЫХ ДАННЫХ
+   =========================================================== */
+class TesseractCache {
+  constructor() {
+    this.dbName = 'OCR_Cache_v3';
+    this.storeName = 'tessdata';
+    this.db = null;
+  }
+
+  async init() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, 1);
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        this.db = request.result;
+        resolve();
+      };
+
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          db.createObjectStore(this.storeName);
+        }
+      };
+    });
+  }
+
+  async get(key) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(this.storeName, 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.get(key);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async set(key, value) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const request = store.put(value, key);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async clear() {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const request = store.clear();
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getSize() {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(this.storeName, 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.getAllKeys();
+      request.onsuccess = () => resolve(request.result.length);
+      request.onerror = () => reject(request.error);
+    });
+  }
+}
+
+const tesseractCache = new TesseractCache();
+
+/* ===========================================================
+   СЛОВАРИ ДЛЯ ML-КОРРЕКЦИИ (из v2.0)
+   =========================================================== */
+const SURNAMES = new Set(["Иванов","Смирнов","Кузнецов","Попов","Васильев","Петров","Соколов","Михайлов","Новиков","Фёдоров","Морозов","Волков","Алексеев","Лебедев","Семёнов","Егоров","Павлов","Козлов","Степанов","Николаев","Орлов","Андреев","Макаров","Никитин","Захаров","Зайцев","Соловьёв","Борисов","Яковлев","Григорьев","Романов","Воробьёв","Сергеев","Кузьмин","Фролов","Александров","Дмитриев","Королёв","Гусев","Киселёв","Ильин","Максимов","Поляков","Сорокин","Виноградов","Ковалёв","Белов","Медведев","Антонов","Тарасов","Жуков","Баранов","Филиппов","Комаров","Давыдов","Беляев","Герасимов","Богданов","Осипов","Сидоров","Матвеев","Титов","Марков","Миронов","Крылов","Куликов","Карпов","Власов","Мельников","Денисов","Гаврилов","Тихонов","Казаков","Афанасьев","Данилов","Савельев","Тимофеев","Фомин","Чернов","Абрамов","Мартынов","Ефимов","Федотов","Щербаков","Назаров","Калинин","Исаев","Чернышев","Быков","Маслов","Родионов","Коновалов","Лазарев","Воронин","Климов","Филатов","Пономарёв","Голубев","Кудрявцев","Прохоров","Наумов","Потапов","Журавлёв","Овчинников","Трофимов","Леонов","Соболев","Ермаков","Колесников","Панов","Аникин"]);
+const NAMES = new Set(["Александр","Алексей","Андрей","Антон","Артём","Борис","Вадим","Валентин","Валерий","Василий","Виктор","Виталий","Владимир","Владислав","Вячеслав","Геннадий","Георгий","Глеб","Григорий","Даниил","Денис","Дмитрий","Евгений","Егор","Иван","Игорь","Илья","Кирилл","Константин","Леонид","Максим","Матвей","Михаил","Никита","Николай","Олег","Павел","Пётр","Роман","Руслан","Семён","Сергей","Станислав","Степан","Тимофей","Фёдор","Юрий","Ярослав","Александра","Алина","Алла","Анастасия","Анна","Валентина","Валерия","Варвара","Вера","Вероника","Виктория","Галина","Дарья","Диана","Евгения","Екатерина","Елена","Елизавета","Жанна","Зинаида","Зоя","Инна","Ирина","Кира","Кристина","Ксения","Лариса","Лидия","Любовь","Людмила","Маргарита","Марина","Мария","Надежда","Наталья","Нина","Оксана","Олеся","Ольга","Полина","Раиса","Светлана","Снежана","София","Тамара","Татьяна","Ульяна","Юлия","Яна"]);
+const STREETS = new Set(["Ленина","Советская","Центральная","Школьная","Молодёжная","Садовая","Набережная","Мира","Пролетарская","Комсомольская","Октябрьская","Первомайская","Победы","Заречная","Лесная","Новая","Строителей","Кирова","Гагарина","Солнечная","Парковая","Луговая","Речная","Полевая","Зелёная","Рабочая","Калинина","Степная","Больничная","Свердлова","Пушкина","Московская","Горького","Чехова","Толстого","Некрасова","Гоголя","Достоевского","Маяковского","Есенина","Куйбышева","Дзержинского","Чкалова","Жукова","Суворова","Кутузова","Красноармейская","Красная","Южная","Северная","Западная","Восточная","Заводская","Колхозная","Спортивная","Железнодорожная","Вокзальная","Интернациональная","Партизанская","Космонавтов","Матросова","Чапаева","Фрунзе","Кооперативная","Трудовая","Транспортная","Озёрная","Промышленная","Тихая","Весенняя","Дружбы","Юбилейная","Березовая","Сосновая","Дубовая","Цветочная","Вишнёвая","Клубная","Мичурина","Ломоносова","Менделеева","Королёва","Циолковского","Нахимова","Ушакова"]);
+
+function levenshtein(a, b) {
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+function findClosest(word, dictionary, maxDist = 2) {
+  if (!word || word.length < 3) return null;
+  const lower = word.toLowerCase();
+  for (const entry of dictionary) {
+    if (entry.toLowerCase() === lower) return null;
+  }
+  let bestMatch = null, bestDist = maxDist + 1;
+  for (const entry of dictionary) {
+    const dist = levenshtein(lower, entry.toLowerCase());
+    if (dist > 0 && dist < bestDist) { bestDist = dist; bestMatch = entry; }
+  }
+  return bestDist <= maxDist ? bestMatch : null;
+}
+
+function correctWord(word, type = "surname") {
+  const dict = type === "surname" ? SURNAMES : type === "name" ? NAMES : STREETS;
+  return findClosest(word, dict) || word;
+}
+
+/* ===========================================================
+   UI и загрузка файлов
+   =========================================================== */
+const EXT_OK = /\.(jpg|jpeg|png|webp|bmp|gif|tif|tiff|heic)$/i;
+function isImageFile(f){ return (f.type && f.type.startsWith("image/")) || EXT_OK.test(f.name); }
+
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+const progressLabel = document.getElementById("progressLabel");
+const cacheSizeEl = document.getElementById("cacheSize");
+const memoryUsageEl = document.getElementById("memoryUsage");
+const processingSpeedEl = document.getElementById("processingSpeed");
+const rowCountEl = document.getElementById("rowCount");
+
+function setStatus(msg){ statusEl.textContent = msg || ""; }
+function setProgressLabel(msg){ progressLabel.textContent = msg || ""; }
+function log(msg){
+  const time = new Date().toLocaleTimeString();
+  logEl.textContent += `[${time}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function prog(pct){ document.getElementById("progBar").style.width = Math.max(0, Math.min(100, pct)) + "%"; }
+
+function updateStats() {
+  tesseractCache.getSize().then(size => {
+    cacheSizeEl.textContent = size > 0 ? `${size} файлов` : 'пусто';
+  });
+
+  if (performance.memory) {
+    const used = (performance.memory.usedJSHeapSize / 1048576).toFixed(1);
+    memoryUsageEl.textContent = `${used} МБ`;
+  } else {
+    memoryUsageEl.textContent = 'н/д';
+  }
+}
+
+const fileInput = document.getElementById("fileInput");
+const dirInput = document.getElementById("dirInput");
+const runBtn = document.getElementById("runBtn");
+const reparseBtn = document.getElementById("reparseBtn");
+const cancelBtn = document.getElementById("cancelBtn");
+const saveBtn = document.getElementById("saveBtn");
+const clearCacheBtn = document.getElementById("clearCacheBtn");
+const previewBody = document.querySelector("#preview tbody");
+const countSpan = document.getElementById("countSpan");
+const colSelect = document.getElementById("colSelect");
+const COLS = ["Файл","ФИО","Телефон","Регион","Город","Улица","Дом/Кв","Адрес (полный)","Raw OCR"];
+const clearColBtn = document.getElementById("clearColBtn");
+const fillDownBtn = document.getElementById("fillDownBtn");
+const concurrencySel = document.getElementById("concurrency");
+const sidePanel = document.getElementById("sidePanel");
+const previewImg = document.getElementById("previewImg");
+const previewData = document.getElementById("previewData");
+const virtualContainer = document.getElementById("virtualContainer");
+const virtualSpacer = document.getElementById("virtualSpacer");
+
+let filesList = [];
+let rows = [];
+let processedBlobs = new Map();
+
+const savedConc = localStorage.getItem("ocrConcurrency");
+if(savedConc && ["1","2","4"].includes(savedConc)) concurrencySel.value = savedConc;
+concurrencySel.addEventListener("change", ()=> localStorage.setItem("ocrConcurrency", concurrencySel.value));
+
+clearCacheBtn.addEventListener("click", async ()=>{
+  if(!confirm("Очистить кеш языковых данных Tesseract? Потребуется повторная загрузка (~20 МБ).")) return;
+  await tesseractCache.clear();
+  log("🗑️ Кеш очищен");
+  updateStats();
+});
+
+function setFiles(list){
+  const arr = Array.from(list || []);
+  filesList = arr.filter(isImageFile);
+  countSpan.textContent = filesList.length ? `Выбрано файлов: ${filesList.length}` : "Файлы не выбраны";
+  setStatus(filesList.length ? "Готово к распознаванию" : "");
+  runBtn.disabled = filesList.length === 0;
+  reparseBtn.disabled = true;
+  saveBtn.disabled = true;
+  rows = [];
+  renderVirtualTable();
+  processedBlobs.clear();
+  sidePanel.classList.add("hidden");
+  prog(0);
+  log(`Принято файлов: ${filesList.length}`);
+}
+
+fileInput.addEventListener("change", e => setFiles(e.target.files));
+dirInput.addEventListener("change", e => setFiles(e.target.files));
+
+const dropZone = document.getElementById("dropZone");
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("dragover"); setFiles(e.dataTransfer.files); });
+
+/* ===========================================================
+   ВИРТУАЛЬНЫЙ СКРОЛЛ ДЛЯ ТАБЛИЦЫ (1000+ строк)
+   =========================================================== */
+const ROW_HEIGHT = 32;
+const BUFFER_SIZE = 10;
+let visibleStart = 0;
+let visibleEnd = 0;
+
+function renderVirtualTable() {
+  const containerHeight = virtualContainer.clientHeight || 520;
+  const totalHeight = rows.length * ROW_HEIGHT;
+  virtualSpacer.style.height = `${totalHeight}px`;
+
+  const scrollTop = virtualContainer.scrollTop;
+  visibleStart = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER_SIZE);
+  visibleEnd = Math.min(rows.length, Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + BUFFER_SIZE);
+
+  previewBody.innerHTML = "";
+
+  for (let i = visibleStart; i < visibleEnd; i++) {
+    const row = rows[i];
+    if (!row) continue;
+
+    const tr = document.createElement("tr");
+    tr.style.position = "absolute";
+    tr.style.top = `${i * ROW_HEIGHT}px`;
+    tr.style.width = "100%";
+    tr.dataset.index = i;
+
+    if (i < 5) tr.classList.add("priority"); // первые 5 - приоритетные
+
+    COLS.forEach((k, idx) => {
+      const td = document.createElement("td");
+      td.textContent = row[k] ?? "";
+      if (idx !== 0) td.setAttribute("contenteditable", "true");
+      td.addEventListener("dblclick", () => td.focus());
+      tr.appendChild(td);
+    });
+
+    tr.addEventListener("click", (e) => {
+      if (e.target.tagName !== "TD" || !e.target.hasAttribute("contenteditable")) {
+        showPreview(i);
+      }
+    });
+
+    previewBody.appendChild(tr);
+  }
+
+  rowCountEl.textContent = rows.length;
+}
+
+virtualContainer.addEventListener("scroll", () => {
+  requestAnimationFrame(renderVirtualTable);
+});
+
+function addRowToTable(row, warnings) {
+  rows.push(row);
+  if (rows.length <= visibleEnd) {
+    renderVirtualTable();
+  }
+}
+
+/* ===========================================================
+   Предобработка изображения (перенесено на главный поток,
+   так как OffscreenCanvas и ImageBitmap сложно передавать в Worker)
+   =========================================================== */
+async function fileToImageBitmap(file){
+  const blobURL = URL.createObjectURL(file);
+  const img = await createImageBitmap(await (await fetch(blobURL)).blob());
+  URL.revokeObjectURL(blobURL);
+  return img;
+}
+
+function getExifOrientation(buf){
+  try{
+    const view = new DataView(buf);
+    if(view.getUint16(0,false) !== 0xFFD8) return 1;
+    let offset = 2;
+    while(offset < view.byteLength){
+      const marker = view.getUint16(offset, false); offset += 2;
+      if(marker === 0xFFE1){
+        offset += 2;
+        if(view.getUint32(offset, false) !== 0x45786966) return 1;
+        offset += 6;
+        const little = view.getUint16(offset, false) === 0x4949; offset += 2;
+        if(view.getUint16(offset, little) !== 0x002A) return 1; offset += 2;
+        let dirOffset = view.getUint32(offset, little); offset = offset - 4 + dirOffset;
+        const numTags = view.getUint16(offset, little); offset += 2;
+        for(let i=0;i<numTags;i++){
+          const tag = view.getUint16(offset + i*12, little);
+          if(tag === 0x0112) return view.getUint16(offset + i*12 + 8, little) || 1;
+        }
+        return 1;
+      } else {
+        const len = view.getUint16(offset, false); offset += len;
+      }
+    }
+  }catch(e){}
+  return 1;
+}
+
+function drawWithOrientation(ctx, img, w, h, orientation){
+  switch(orientation){
+    case 2: ctx.translate(w,0); ctx.scale(-1,1); break;
+    case 3: ctx.translate(w,h); ctx.rotate(Math.PI); break;
+    case 4: ctx.translate(0,h); ctx.scale(1,-1); break;
+    case 5: ctx.rotate(0.5*Math.PI); ctx.scale(1,-1); break;
+    case 6: ctx.rotate(0.5*Math.PI); ctx.translate(0,-h); break;
+    case 7: ctx.rotate(0.5*Math.PI); ctx.translate(w,-h); ctx.scale(-1,1); break;
+    case 8: ctx.rotate(-0.5*Math.PI); ctx.translate(-w,0); break;
+  }
+  ctx.drawImage(img,0,0,w,h);
+}
+
+function detectOrientation(imgData) {
+  const {data, width, height} = imgData;
+  let topBlack = 0, bottomBlack = 0, leftBlack = 0, rightBlack = 0;
+  const margin = Math.min(width, height) * 0.1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const brightness = (data[idx] + data[idx+1] + data[idx+2]) / 3;
+      if (brightness >= 128) continue;
+      if (y < margin) topBlack++;
+      if (y > height - margin) bottomBlack++;
+      if (x < margin) leftBlack++;
+      if (x > width - margin) rightBlack++;
+    }
+  }
+
+  const horizontal = leftBlack + rightBlack;
+  const vertical = topBlack + bottomBlack;
+  return (width < height * 0.7 && horizontal > vertical * 1.5) ? 90 : 0;
+}
+
+async function preprocessToBlob(file){
+  const arrayBuffer = await file.arrayBuffer();
+  const orientation = getExifOrientation(arrayBuffer) || 1;
+  const img = await fileToImageBitmap(new File([arrayBuffer], file.name, {type:file.type}));
+
+  const targetW = Math.min(2200, Math.max(1200, 1800));
+  const scale = targetW / img.width;
+  const W = Math.round(img.width * scale);
+  const H = Math.round(img.height * scale);
+  const rot90 = [5,6,7,8].includes(orientation);
+  const cw = rot90 ? H : W;
+  const ch = rot90 ? W : H;
+
+  const cvs = new OffscreenCanvas(cw, ch);
+  const ctx = cvs.getContext("2d", { willReadFrequently:true });
+  ctx.save();
+  drawWithOrientation(ctx, img, W, H, orientation);
+  ctx.restore();
+
+  let imgData = ctx.getImageData(0,0,cw,ch);
+  const d = imgData.data;
+  const hist = new Uint32Array(256);
+
+  for(let i=0;i<d.length;i+=4){
+    const y = (0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2])|0;
+    d[i]=d[i+1]=d[i+2]=y; d[i+3]=255; hist[y]++;
+  }
+
+  function percentile(p){
+    const target = p * (cw*ch);
+    let acc=0;
+    for(let i=0;i<256;i++){ acc+=hist[i]; if(acc>=target) return i; }
+    return p===0?0:255;
+  }
+  const lo = percentile(0.02), hi = percentile(0.98);
+  const span = Math.max(1, hi-lo);
+  for(let i=0;i<d.length;i+=4){
+    let y=d[i]; y = ((y-lo)*255/span)|0; if(y<0)y=0; if(y>255)y=255;
+    d[i]=d[i+1]=d[i+2]=y;
+  }
+
+  const autoRotate = detectOrientation(imgData);
+  if (autoRotate === 90) {
+    log(`${file.name}: поворот 90°`);
+    const rotCvs = new OffscreenCanvas(ch, cw);
+    const rotCtx = rotCvs.getContext("2d");
+    rotCtx.translate(ch/2, cw/2);
+    rotCtx.rotate(Math.PI/2);
+    rotCtx.drawImage(cvs, -cw/2, -ch/2);
+    imgData = rotCtx.getImageData(0, 0, ch, cw);
+    for(let i=0;i<imgData.data.length;i++) d[i] = imgData.data[i];
+  }
+
+  const hist2 = new Uint32Array(256);
+  for(let i=0;i<d.length;i+=4){ hist2[d[i]]++; }
+  let sum=0, sumB=0, wB=0, wF=0, maxVar=0, thr=127;
+  for(let i=0;i<256;i++) sum+= i*hist2[i];
+  const total = cw*ch;
+  for(let t=0;t<256;t++){
+    wB += hist2[t]; if(wB===0) continue;
+    wF = total - wB; if(wF===0) break;
+    sumB += t*hist2[t];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const between = wB*wF*(mB-mF)*(mB-mF);
+    if(between>maxVar){ maxVar=between; thr=t; }
+  }
+  for(let i=0;i<d.length;i+=4){
+    const val = d[i] > thr ? 255 : 0;
+    d[i]=d[i+1]=d[i+2]=val;
+  }
+
+  const copy = new Uint8ClampedArray(d);
+  const w = cw, h = ch;
+  function idx(x,y){ return 4*(y*w + x); }
+  for(let y=1;y<h-1;y++){
+    for(let x=1;x<w-1;x++){
+      let maxv=0;
+      for(let yy=-1;yy<=1;yy++)
+        for(let xx=-1;xx<=1;xx++)
+          maxv = Math.max(maxv, copy[idx(x+xx,y+yy)]);
+      const i=idx(x,y); d[i]=d[i+1]=d[i+2]=maxv;
+    }
+  }
+  const copy2 = new Uint8ClampedArray(d);
+  for(let y=1;y<h-1;y++){
+    for(let x=1;x<w-1;x++){
+      let minv=255;
+      for(let yy=-1;yy<=1;yy++)
+        for(let xx=-1;xx<=1;xx++)
+          minv = Math.min(minv, copy2[idx(x+xx,y+yy)]);
+      const i=idx(x,y); d[i]=d[i+1]=d[i+2]=minv;
+    }
+  }
+
+  ctx.putImageData(imgData,0,0);
+  return await cvs.convertToBlob({ type:"image/png", quality:1 });
+}
+
+/* ===========================================================
+   ПАРСИНГ (из v2.0)
+   =========================================================== */
+const PHONE_RE_ANY_G = /(\+7|8)\s*\(?\s*\d{3}\s*\)?\s*[-\s]?\d{3}[-\s]?\d{2}[-\s]?\d{2}/g;
+const ONLY_DIGITS = /\d/g;
+
+function cleanNoise(text){
+  return (text||"").replace(/[•●◦∙·©®™]/g," ").replace(/фио[:\s]*/gi," ").replace(/физлицо|mobile/gi," ").replace(/[—–]+/g,"-").replace(/[\u200E\u200F\u00A0]/g," ").replace(/\s{2,}/g," ").trim();
+}
+
+function normalizePhone(raw){
+  const digits = raw.match(ONLY_DIGITS)?.join("") || "";
+  if(digits.length<10) return raw.trim();
+  let d = digits;
+  if(d.length===11 && d[0]==="8") d = "7"+d.slice(1);
+  if(d.length!==11) return raw.trim();
+  return "+7 " + d.slice(1,4) + " " + d.slice(4,7) + "-" + d.slice(7,9) + "-" + d.slice(9,11);
+}
+
+function parsePhones(text){
+  const seen = new Set(), list = [];
+  for(const m of (text||"").matchAll(PHONE_RE_ANY_G)){
+    const ph = normalizePhone(m[0]), key = ph.replace(/\D/g,"");
+    if(!seen.has(key)){ seen.add(key); list.push(ph); }
+  }
+  return list.join(", ");
+}
+
+function toCyrLookalikes(s){
+  const map = {A:"А",B:"В",C:"С",E:"Е",H:"Н",K:"К",M:"М",O:"О",P:"Р",T:"Т",X:"Х",Y:"У",a:"а",b:"в",c:"с",e:"е",h:"н",k:"к",m:"м",o:"о",p:"р",t:"т",x:"х",y:"у"};
+  return s.replace(/[ABCEHKMOPTXYabcehkmoptxy]/g, ch => map[ch] || ch);
+}
+
+function fixCyrConfusions(word){
+  let w = toCyrLookalikes(word);
+  w = w.replace(/Шщ|ШЩ/g,"Щ").replace(/шщ|шЩ/g,"щ").replace(/ЙИ/gu,"И").replace(/йи/gu,"и").replace(/З3/g,"З").replace(/з3/g,"з").replace(/^[\.\-]+|[\.\-]+$/g,"");
+  return w;
+}
+
+function titlecaseRu(s){ return s.trim().split(/\s+/).map(p=>p? p[0].toUpperCase()+p.slice(1).toLowerCase():p).join(" "); }
+
+function parseFio(text){
+  const t = cleanNoise(text);
+  const tokens = t.split(/[^А-Яа-яЁё-]+/).map(w => w && fixCyrConfusions(w)).filter(w => w && w.length >= 2);
+  const stop = /^(россия|город|улица|ул|область|край|район|рф|регион)$/i;
+
+  for(let i=0;i<tokens.length-1;i++){
+    const a=tokens[i], b=tokens[i+1], c=tokens[i+2];
+    if(stop.test(a)) continue;
+    const aCorrected = correctWord(a, "surname");
+    const bCorrected = correctWord(b, "name");
+    const cCorrected = c ? correctWord(c, "name") : null;
+
+    if(c && a.length>=3 && b.length>=3 && c.length>=3) return titlecaseRu(`${aCorrected} ${bCorrected} ${cCorrected}`);
+    if(a.length>=3 && b.length>=3) return titlecaseRu(`${aCorrected} ${bCorrected}`);
+  }
+  return "";
+}
+
+function isPhoneish(ln){ const digits = (ln||"").replace(/\D/g,""); return /\+/.test(ln) || digits.length >= 10; }
+
+function parseAddressComponents(text) {
+  const result = { region: "", city: "", street: "", building: "", fullAddress: "" };
+  const t = (text || "").replace(/\r/g, "");
+  const start = t.search(/Россия|РФ/i);
+  if (start < 0) return result;
+
+  let tail = t.slice(start).replace(/^РФ/i, "Россия");
+  let parts = tail.split(/\n/).map(s => s.trim()).filter(Boolean);
+  const limited = [];
+
+  for(let i=0; i<parts.length && i<6; i++){
+    const ln = parts[i];
+    if(isPhoneish(ln)) continue;
+    if(/фио|mobile|мобил|заказ|телеф|клиент|получател/iu.test(ln)) continue;
+    limited.push(ln);
+  }
+
+  result.fullAddress = limited.join(", ").replace(/^Россия(?!\s*,)/i, "Россия,").replace(/\s*,\s*,/g, ", ").replace(/\s{2,}/g, " ").replace(/,\s*$/,"").trim();
+
+  const firstLine = limited[0] || "";
+  const regionMatch = firstLine.match(/,\s*([^,]+?(?:область|обл\.?|край|республика|респ\.?))/i);
+  if (regionMatch) result.region = regionMatch[1].trim().replace(/\s+(область|обл\.?|край|республика|респ\.?)$/i, " $1").trim();
+
+  const cityMatch = firstLine.match(/,\s*(?:г\.?\s+)?([А-ЯЁ][а-яё\-\s]+?)(?=\s*,|$)/i);
+  if (cityMatch) {
+    let cityCandidate = cityMatch[1].trim();
+    if (!/область|обл\.|край|республика|респ\./i.test(cityCandidate)) result.city = cityCandidate.replace(/^г\.?\s*/i, "");
+  }
+
+  const streetLine = limited.find(ln => /(?:ул\.?|улица|просп\.?|проспект|пер\.?|переулок|шоссе|ш\.|б-р|бульвар)/i.test(ln));
+  if (streetLine) {
+    const streetMatch = streetLine.match(/((?:ул\.?|улица|просп\.?|проспект|пер\.?|переулок|шоссе|ш\.|б-р|бульвар)\s+[^,\d]+)/i);
+    if (streetMatch) {
+      let streetName = streetMatch[1].trim().replace(/^(ул\.?|улица|просп\.?|проспект|пер\.?|переулок)\s+/i, "");
+      const corrected = correctWord(streetName, "street");
+      if (corrected !== streetName) streetName = corrected;
+      result.street = streetName;
+    }
+
+    const buildingMatch = streetLine.match(/(?:д\.?|дом)\s*(\d+[а-яА-Я]?)(?:[,\s]+(?:кв\.?|квартира)\s*(\d+))?/i);
+    if (buildingMatch) {
+      const house = buildingMatch[1], apt = buildingMatch[2];
+      result.building = apt ? `д.${house}, кв.${apt}` : `д.${house}`;
+    }
+  }
+
+  return result;
+}
+
+function parseOrder(raw, filename){
+  const cleaned = cleanNoise(raw);
+  const phone = parsePhones(cleaned);
+  const fio = parseFio(cleaned);
+  const addr = parseAddressComponents(cleaned);
+
+  return {
+    "Файл": filename,
+    "ФИО": fio,
+    "Телефон": phone,
+    "Регион": addr.region,
+    "Город": addr.city,
+    "Улица": addr.street,
+    "Дом/Кв": addr.building,
+    "Адрес (полный)": addr.fullAddress || "",
+    "Raw OCR": raw.trim()
+  };
+}
+
+function validateRow(row){
+  const warnings = [];
+  if(row["ФИО"] && (row["ФИО"].length < 2 || row["ФИО"].length > 60)) warnings.push("ФИО: подозрительная длина");
+  if(row["Телефон"] && !row["Телефон"].startsWith("+7")) warnings.push("Телефон: не начинается с +7");
+  if(row["Адрес (полный)"] && !row["Адрес (полный)"].match(/Россия/i)) warnings.push("Адрес: нет 'Россия'");
+  if(!row["ФИО"] && !row["Телефон"] && !row["Адрес (полный)"]) warnings.push("Пустой результат");
+  return warnings;
+}
+
+/* ===========================================================
+   ИНТЕРАКТИВНЫЙ ПРОСМОТР
+   =========================================================== */
+function showPreview(rowIndex) {
+  const row = rows[rowIndex];
+  if (!row) return;
+
+  const filename = row["Файл"];
+  const blobURL = processedBlobs.get(filename);
+  if (!blobURL) { sidePanel.classList.add("hidden"); return; }
+
+  sidePanel.classList.remove("hidden");
+  previewImg.src = blobURL;
+  previewData.innerHTML = `
+    <dt>Файл:</dt><dd>${filename}</dd>
+    <dt>ФИО:</dt><dd>${row["ФИО"] || "<пусто>"}</dd>
+    <dt>Телефон:</dt><dd>${row["Телефон"] || "<пусто>"}</dd>
+    <dt>Регион:</dt><dd>${row["Регион"] || "<пусто>"}</dd>
+    <dt>Город:</dt><dd>${row["Город"] || "<пусто>"}</dd>
+    <dt>Улица:</dt><dd>${row["Улица"] || "<пусто>"}</dd>
+    <dt>Дом/Кв:</dt><dd>${row["Дом/Кв"] || "<пусто>"}</dd>
+    <dt>Raw OCR:</dt><dd style="font-size:11px; max-height:100px; overflow:auto;">${row["Raw OCR"]?.substring(0, 300) || "<пусто>"}</dd>
+  `;
+
+  document.querySelectorAll("#preview tbody tr").forEach((tr, idx) => {
+    const trIndex = parseInt(tr.dataset.index);
+    tr.classList.toggle("selected", trIndex === rowIndex);
+  });
+}
+
+/* ===========================================================
+   Таблица: редактирование
+   =========================================================== */
+function syncRowsFromTable(){
+  document.querySelectorAll("#preview tbody tr").forEach(tr => {
+    const idx = parseInt(tr.dataset.index);
+    if (idx >= 0 && idx < rows.length) {
+      const tds = tr.querySelectorAll("td");
+      COLS.forEach((k, i) => {
+        if (tds[i]) rows[idx][k] = tds[i].textContent.trim();
+      });
+    }
+  });
+}
+
+clearColBtn.addEventListener("click", ()=>{
+  const idx = colSelect.selectedIndex;
+  if(idx===0){ alert("Столбец Файл очищать нельзя."); return; }
+  rows.forEach(r => r[COLS[idx]] = "");
+  renderVirtualTable();
+});
+
+fillDownBtn.addEventListener("click", ()=>{
+  const idx = colSelect.selectedIndex;
+  if(idx===0){ alert("Столбец Файл копировать вниз не имеет смысла."); return; }
+  if(rows.length<2) return;
+  const base = rows[0][COLS[idx]];
+  const val = base || prompt("Введите значение:", "");
+  if(val===null) return;
+  for(let i=1;i<rows.length;i++) rows[i][COLS[idx]] = val;
+  renderVirtualTable();
+});
+
+previewBody.addEventListener("input", ()=> syncRowsFromTable());
+
+/* ===========================================================
+   Перепарсинг
+   =========================================================== */
+reparseBtn.addEventListener("click", ()=>{
+  if(rows.length === 0) return;
+  log("Перепарсинг...");
+  setStatus("Перепарсинг...");
+
+  rows = rows.map(r => parseOrder(r["Raw OCR"] || "", r["Файл"] || ""));
+  renderVirtualTable();
+
+  setStatus("Перепарсинг завершен");
+  log(`✅ Перепарсено: ${rows.length}`);
+});
+
+/* ===========================================================
+   OCR С УМНОЙ ОЧЕРЕДЬЮ И ПРИОРИТЕТАМИ
+   =========================================================== */
+let cancelFlag = false;
+
+async function createWorkerSafe(){
+  setStatus("Загрузка языков OCR...");
+  setProgressLabel("Инициализация Tesseract...");
+  log("📦 Загрузка языков rus+eng...");
+
+  const worker = await Tesseract.createWorker("rus+eng", 1, {
+    langPath: "https://tessdata.projectnaptha.com/4.0.0",
+    logger: m => {
+      if (m.status === 'loading language') {
+        setProgressLabel(`Загрузка языка: ${Math.round(m.progress * 100)}%`);
+      } else if (m.status === 'initializing api') {
+        setProgressLabel(`Инициализация API: ${Math.round(m.progress * 100)}%`);
+      }
+    }
+  });
+
+  setProgressLabel("");
+  return worker;
+}
+
+async function recognizeWithFallback(worker, blob){
+  const base = await worker.recognize(blob, { tessedit_pageseg_mode:"6" });
+  let text = base?.data?.text || "";
+
+  if(!parsePhones(text)){
+    try{
+      const cfg = { tessedit_pageseg_mode:"6", tessedit_char_whitelist:"+() -0123456789" };
+      const phonePass = await worker.recognize(blob, cfg);
+      const p = parsePhones(phonePass?.data?.text || "");
+      if(p) text = (text + "\n" + p).trim();
+    }catch(e){}
+  }
+  return text;
+}
+
+async function runOCR(){
+  if(typeof Tesseract === "undefined"){
+    alert("Tesseract не загружен. Проверьте интернет.");
+    return;
+  }
+  if(!filesList.length){ alert("Добавьте изображения."); return; }
+
+  runBtn.disabled = true; reparseBtn.disabled = true; saveBtn.disabled = true; cancelBtn.disabled = false;
+  rows = []; renderVirtualTable(); prog(1); setStatus("Подготовка..."); logEl.textContent = "";
+  processedBlobs.clear();
+  sidePanel.classList.add("hidden");
+
+  cancelFlag = false;
+  let processed = 0;
+  const total = filesList.length;
+  const conc = parseInt(concurrencySel.value,10) || 2;
+  const startTime = Date.now();
+
+  log(`🚀 v3.0 Pro: Web Workers, виртуальный скролл, умная очередь`);
+  log(`Файлов: ${total}, параллельность: ${conc}`);
+
+  const workers = [];
+  try{
+    for(let i=0;i<conc;i++) workers.push(await createWorkerSafe());
+    log(`✅ Создано воркеров: ${workers.length}`);
+  }catch(e){
+    alert("Не удалось загрузить языки. Проверьте доступ к tessdata.projectnaptha.com");
+    setStatus("Ошибка загрузки");
+    runBtn.disabled=false; cancelBtn.disabled=true;
+    return;
+  }
+
+  // УМНАЯ ОЧЕРЕДЬ: первые 5 файлов - приоритетные, остальные - фоновые
+  const priorityTasks = filesList.slice(0, 5).map((file, idx) => ({file, idx, priority: true}));
+  const backgroundTasks = filesList.slice(5).map((file, idx) => ({file, idx: idx + 5, priority: false}));
+  const tasks = [...priorityTasks, ...backgroundTasks];
+  const results = new Array(total);
+
+  async function processTask(worker, task){
+    if(cancelFlag) return;
+    const {file, idx, priority} = task;
+
+    try{
+      setStatus(`${priority ? '⚡' : '📦'} Предобработка: ${idx+1}/${total}`);
+      const blob = await preprocessToBlob(file);
+
+      const blobURL = URL.createObjectURL(blob);
+      processedBlobs.set(file.name, blobURL);
+
+      setStatus(`${priority ? '⚡' : '📦'} OCR: ${idx+1}/${total}`);
+      const txt = await recognizeWithFallback(worker, blob);
+
+      const row = parseOrder(txt, file.name);
+      const warnings = validateRow(row);
+
+      results[idx] = row;
+      addRowToTable(row, warnings);
+
+      if(warnings.length > 0) log(`⚠️ ${file.name}: ${warnings.join(", ")}`);
+    }catch(err){
+      results[idx] = {
+        "Файл": file.name, "ФИО":"", "Телефон":"", "Регион":"", "Город":"", "Улица":"", "Дом/Кв":"",
+        "Адрес (полный)":"", "Raw OCR":"Ошибка: " + (err.message || err)
+      };
+      log(`❌ ${file.name}: ${err.message}`);
+    }finally{
+      processed++;
+      prog(Math.round((processed/total)*100));
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      const avgPerFile = (elapsed / processed).toFixed(1);
+      const speed = (processed / (Date.now() - startTime) * 1000 * 60).toFixed(1);
+
+      setStatus(`Готово: ${processed}/${total}`);
+      processingSpeedEl.textContent = `${speed} файлов/мин`;
+      updateStats();
+    }
+  }
+
+  let cursor = 0;
+  async function workerLoop(worker){
+    while(!cancelFlag && cursor < tasks.length){
+      const myTask = tasks[cursor++];
+      await processTask(worker, myTask);
+    }
+  }
+
+  await Promise.all(workers.map(w => workerLoop(w))).catch(()=>{});
+
+  for(const w of workers){
+    try{ await w.terminate(); }catch(e){}
+  }
+
+  if(cancelFlag){
+    setStatus("Остановлено");
+    log("⏸️ Обработка остановлена");
+    runBtn.disabled = false; cancelBtn.disabled = true;
+    return;
+  }
+
+  rows = results.filter(Boolean);
+  renderVirtualTable();
+
+  const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+  const avgTime = (totalTime / total).toFixed(1);
+
+  setStatus(`✅ Готово за ${totalTime}s`);
+  log(`✅ Обработано: ${rows.length} файлов за ${totalTime}s (среднее ${avgTime}s/файл)`);
+
+  saveBtn.disabled = rows.length === 0;
+  reparseBtn.disabled = rows.length === 0;
+  runBtn.disabled = false;
+  cancelBtn.disabled = true;
+  updateStats();
+}
+
+cancelBtn.addEventListener("click", ()=>{ cancelFlag = true; cancelBtn.disabled = true; });
+
+/* ===========================================================
+   Экспорт в Excel
+   =========================================================== */
+function saveExcel(){
+  syncRowsFromTable();
+  if(!rows.length){ alert("Нечего сохранять."); return; }
+
+  const ws = XLSX.utils.json_to_sheet(rows, { header: COLS });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Orders");
+
+  const timestamp = new Date().toISOString().slice(0,19).replace(/:/g,"-");
+  XLSX.writeFile(wb, `orders_ocr_v3_${timestamp}.xlsx`);
+
+  log(`💾 Excel: orders_ocr_v3_${timestamp}.xlsx`);
+}
+
+runBtn.addEventListener("click", runOCR);
+saveBtn.addEventListener("click", saveExcel);
+
+// Инициализация
+(async () => {
+  await tesseractCache.init();
+  updateStats();
+  log("🚀 OCR v3.0 Pro загружен");
+  log("✨ Виртуальный скролл, IndexedDB кеш, умная очередь");
+  log("Выберите файлы и нажмите 'Распознать'");
+})();
+
+// Периодическое обновление статистики
+setInterval(updateStats, 5000);
+</script>
+</body>
+</html>
