@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OCR мини-карточек заказов -> Excel</title>
+  <style>
+    :root { --accent:#2563eb; --border:#e5e7eb; --muted:#6b7280; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color:#111827; }
+    h1 { font-size: 22px; margin: 0 0 12px; }
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; background:#fff; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .spacer { flex:1; }
+    .btn { padding:10px 14px; border:1px solid #374151; background:#fff; border-radius:10px; cursor:pointer; }
+    .btn:disabled { opacity:.5; cursor:default; }
+    .btn.secondary { border-color:var(--border); }
+    .drop { border:2px dashed #9ca3af; border-radius:12px; padding:18px; text-align:center; color:#374151; }
+    .drop.dragover { border-color: var(--accent); background:#eef2ff; color:#1d4ed8; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .status { font-size: 13px; margin-left: 8px; }
+    .progress { height: 8px; background:#f3f4f6; border-radius:6px; overflow:hidden; margin-top:8px; }
+    .bar { height:100%; width:0%; background:var(--accent); transition:width .18s ease; }
+    .grid { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .grid th, .grid td { border:1px solid #f3f4f6; padding:6px 8px; font-size:13px; vertical-align:top; }
+    .grid th { background:#fafafa; text-align:left; position:sticky; top:0; z-index:1; }
+    td[contenteditable="true"] { background:#fff; outline:none; }
+    td[contenteditable="true"]:focus { box-shadow: inset 0 0 0 2px rgba(37,99,235,.2); }
+    .tools { display:flex; gap:8px; align-items:center; }
+    .select { padding:8px 10px; border:1px solid #9ca3af; border-radius:10px; background:#fff; }
+    .small { font-size:12px; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; background:#f9fafb; border:1px solid var(--border); border-radius:8px; padding:8px; max-height:110px; overflow:auto; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>OCR мини-карточек заказов -> Excel</h1>
+
+  <div class="card">
+    <div class="row">
+      <label class="btn">
+        Выбрать файлы
+        <input id="fileInput" type="file" accept="image/*" multiple style="display:none" />
+      </label>
+      <label class="btn">
+        Выбрать папку
+        <input id="dirInput" type="file" webkitdirectory style="display:none" />
+      </label>
+      <button id="runBtn" class="btn" disabled>Распознать</button>
+      <button id="reparseBtn" class="btn secondary" disabled>Перепарсить</button>
+      <button id="cancelBtn" class="btn secondary" disabled>Отмена</button>
+      <button id="saveBtn" class="btn" disabled>Скачать Excel</button>
+      <span id="countSpan" class="muted">Файлы не выбраны</span>
+      <span class="spacer"></span>
+      <label class="muted">Параллельность
+        <select id="concurrency" class="select">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="dropZone" class="drop" style="margin-top:12px;">
+      Перетащите сюда изображения или нажмите "Выбрать папку/файлы", затем "Распознать".
+      <div class="progress"><div id="progBar" class="bar"></div></div>
+      <div id="status" class="status muted"></div>
+    </div>
+    <div class="small muted" style="margin-top:8px;">
+      Работает локально в браузере. На первый запуск нужен интернет для загрузки языка rus.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content: space-between">
+      <div class="muted">Предпросмотр данных и правка:</div>
+      <div class="tools">
+        <label class="muted">Столбец:
+          <select id="colSelect" class="select">
+            <option>Файл</option>
+            <option selected>ФИО</option>
+            <option>Телефон</option>
+            <option>Адрес</option>
+            <option>Raw OCR</option>
+          </select>
+
+        </label>
+        <button id="clearColBtn" class="btn secondary">Очистить столбец</button>
+        <button id="fillDownBtn" class="btn secondary">Копировать вниз</button>
+      </div>
+    </div>
+    <div style="overflow:auto; max-height: 420px; border:1px solid var(--border); border-radius:8px;">
+      <table id="preview" class="grid">
+        <thead>
+          <tr>
+            <th>Файл</th><th>ФИО</th><th>Телефон</th><th>Адрес</th><th>Raw OCR</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="small muted" style="margin-top:8px;">
+      Подсказка: двойной клик по ячейке включает редактирование. "Перепарсить" - пересчитать данные из Raw OCR без повторного распознавания.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="muted">Логи и диагностика:</div>
+    <div id="log" class="log"></div>
+  </div>
+
+<script>
+/* ===========================================================
+   UI и загрузка файлов
+   =========================================================== */
+const EXT_OK = /\.(jpg|jpeg|png|webp|bmp|gif|tif|tiff|heic)$/i;
+function isImageFile(f){
+  return (f.type && f.type.startsWith("image/")) || EXT_OK.test(f.name);
+}
+
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+function setStatus(msg){ statusEl.textContent = msg || ""; }
+function log(msg){
+  const time = new Date().toLocaleTimeString();
+  logEl.textContent += `[${time}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function prog(pct){ document.getElementById("progBar").style.width = Math.max(0, Math.min(100, pct)) + "%"; }
+
+const fileInput = document.getElementById("fileInput");
+const dirInput  = document.getElementById("dirInput");
+const runBtn    = document.getElementById("runBtn");
+const reparseBtn = document.getElementById("reparseBtn");
+const cancelBtn = document.getElementById("cancelBtn");
+const saveBtn   = document.getElementById("saveBtn");
+const previewBody = document.querySelector("#preview tbody");
+const countSpan = document.getElementById("countSpan");
+const colSelect = document.getElementById("colSelect");
+const COLS = ["Файл","ФИО","Телефон","Адрес","Raw OCR"];
+const clearColBtn = document.getElementById("clearColBtn");
+const fillDownBtn = document.getElementById("fillDownBtn");
+const concurrencySel = document.getElementById("concurrency");
+
+let filesList = [];
+let rows = [];
+
+// Загрузка сохраненной параллельности из localStorage
+const savedConc = localStorage.getItem("ocrConcurrency");
+if(savedConc && (savedConc === "1" || savedConc === "2")){
+  concurrencySel.value = savedConc;
+}
+concurrencySel.addEventListener("change", ()=> {
+  localStorage.setItem("ocrConcurrency", concurrencySel.value);
+});
+
+function setFiles(list){
+  const arr = Array.from(list || []);
+  filesList = arr.filter(isImageFile);
+  countSpan.textContent = filesList.length ? `Выбрано файлов: ${filesList.length}` : "Файлы не выбраны";
+  setStatus(filesList.length ? "Готово к распознаванию" : "");
+  runBtn.disabled = filesList.length === 0;
+  reparseBtn.disabled = true;
+  saveBtn.disabled = true;
+  rows = [];
+  previewBody.innerHTML = "";
+  prog(0);
+  log(`Принято файлов: ${filesList.length}`);
+  // Убрали автозапуск - пользователь должен нажать "Распознать"
+}
+
+fileInput.addEventListener("change", e => setFiles(e.target.files));
+dirInput .addEventListener("change", e => setFiles(e.target.files));
+
+const dropZone = document.getElementById("dropZone");
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("dragover"); setFiles(e.dataTransfer.files); });
+
+/* ===========================================================
+   Предобработка изображения на canvas
+   =========================================================== */
+async function fileToImageBitmap(file){
+  const blobURL = URL.createObjectURL(file);
+  const img = await createImageBitmap(await (await fetch(blobURL)).blob());
+  URL.revokeObjectURL(blobURL);
+  return img;
+}
+
+function getExifOrientation(buf){
+  try{
+    const view = new DataView(buf);
+    if(view.getUint16(0,false) !== 0xFFD8) return 1;
+    let offset = 2;
+    while(offset < view.byteLength){
+      const marker = view.getUint16(offset, false); offset += 2;
+      if(marker === 0xFFE1){
+        offset += 2;
+        if(view.getUint32(offset, false) !== 0x45786966) return 1;
+        offset += 6;
+        const little = view.getUint16(offset, false) === 0x4949; offset += 2;
+        if(view.getUint16(offset, little) !== 0x002A) return 1; offset += 2;
+        let dirOffset = view.getUint32(offset, little); offset = offset - 4 + dirOffset;
+        const numTags = view.getUint16(offset, little); offset += 2;
+        for(let i=0;i<numTags;i++){
+          const tag = view.getUint16(offset + i*12, little);
+          if(tag === 0x0112){
+            const val = view.getUint16(offset + i*12 + 8, little);
+            return val || 1;
+          }
+        }
+        return 1;
+      } else {
+        const len = view.getUint16(offset, false); offset += len;
+      }
+    }
+  }catch(e){}
+  return 1;
+}
+
+function drawWithOrientation(ctx, img, w, h, orientation){
+  switch(orientation){
+    case 2: ctx.translate(w,0); ctx.scale(-1,1); break;
+    case 3: ctx.translate(w,h); ctx.rotate(Math.PI); break;
+    case 4: ctx.translate(0,h); ctx.scale(1,-1); break;
+    case 5: ctx.rotate(0.5*Math.PI); ctx.scale(1,-1); break;
+    case 6: ctx.rotate(0.5*Math.PI); ctx.translate(0,-h); break;
+    case 7: ctx.rotate(0.5*Math.PI); ctx.translate(w,-h); ctx.scale(-1,1); break;
+    case 8: ctx.rotate(-0.5*Math.PI); ctx.translate(-w,0); break;
+    default: break;
+  }
+  ctx.drawImage(img,0,0,w,h);
+}
+
+async function preprocessToBlob(file){
+  const arrayBuffer = await file.arrayBuffer();
+  const orientation = getExifOrientation(arrayBuffer) || 1;
+
+  const img = await fileToImageBitmap(new File([arrayBuffer], file.name, {type:file.type}));
+  const targetW = Math.min(2200, Math.max(1200, 1800));
+  const scale = targetW / img.width;
+  const W = Math.round(img.width * scale);
+  const H = Math.round(img.height * scale);
+
+  const rot90 = [5,6,7,8].includes(orientation);
+  const cw = rot90 ? H : W;
+  const ch = rot90 ? W : H;
+
+  const cvs = new OffscreenCanvas(cw, ch);
+  const ctx = cvs.getContext("2d", { willReadFrequently:true });
+  ctx.save();
+  drawWithOrientation(ctx, img, W, H, orientation);
+  ctx.restore();
+
+  // grayscale
+  let imgData = ctx.getImageData(0,0,cw,ch);
+  const d = imgData.data;
+  const hist = new Uint32Array(256);
+  for(let i=0;i<d.length;i+=4){
+    const y = (0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2])|0;
+    d[i]=d[i+1]=d[i+2]=y; d[i+3]=255; hist[y]++;
+  }
+
+  // contrast stretch: 2-й и 98-й перцентили
+  function percentile(p){
+    const target = p * (cw*ch);
+    let acc=0;
+    for(let i=0;i<256;i++){ acc+=hist[i]; if(acc>=target) return i; }
+    return p===0?0:255;
+  }
+  const lo = percentile(0.02), hi = percentile(0.98);
+  const span = Math.max(1, hi-lo);
+  for(let i=0;i<d.length;i+=4){
+    let y=d[i]; y = ((y-lo)*255/span)|0; if(y<0)y=0; if(y>255)y=255;
+    d[i]=d[i+1]=d[i+2]=y;
+  }
+
+  // Otsu threshold
+  const hist2 = new Uint32Array(256);
+  for(let i=0;i<d.length;i+=4){ hist2[d[i]]++; }
+  let sum=0, sumB=0, wB=0, wF=0, mB=0, mF=0, maxVar=0, thr=127;
+  for(let i=0;i<256;i++) sum+= i*hist2[i];
+  const total = cw*ch;
+  for(let t=0;t<256;t++){
+    wB += hist2[t]; if(wB===0) continue;
+    wF = total - wB; if(wF===0) break;
+    sumB += t*hist2[t];
+    mB = sumB / wB; mF = (sum - sumB) / wF;
+    const between = wB*wF*(mB-mF)*(mB-mF);
+    if(between>maxVar){ maxVar=between; thr=t; }
+  }
+  for(let i=0;i<d.length;i+=4){
+    const val = d[i] > thr ? 255 : 0;
+    d[i]=d[i+1]=d[i+2]=val;
+  }
+
+  // morphology close (dilate -> erode) 3x3
+  const copy = new Uint8ClampedArray(d);
+  const w = cw, h = ch;
+  function idx(x,y){ return 4*(y*w + x); }
+  // dilate
+  for(let y=1;y<h-1;y++){
+    for(let x=1;x<w-1;x++){
+      let maxv=0;
+      for(let yy=-1;yy<=1;yy++)
+        for(let xx=-1;xx<=1;xx++)
+          maxv = Math.max(maxv, copy[idx(x+xx,y+yy)]);
+      const i=idx(x,y); d[i]=d[i+1]=d[i+2]=maxv;
+    }
+  }
+  // erode
+  const copy2 = new Uint8ClampedArray(d);
+  for(let y=1;y<h-1;y++){
+    for(let x=1;x<w-1;x++){
+      let minv=255;
+      for(let yy=-1;yy<=1;yy++)
+        for(let xx=-1;xx<=1;xx++)
+          minv = Math.min(minv, copy2[idx(x+xx,y+yy)]);
+      const i=idx(x,y); d[i]=d[i+1]=d[i+2]=minv;
+    }
+  }
+
+  ctx.putImageData(imgData,0,0);
+  const blob = await cvs.convertToBlob({ type:"image/png", quality:1 });
+  return blob;
+}
+
+/* ===========================================================
+   Парсинг полей из Raw OCR
+   =========================================================== */
+const PHONE_RE_ANY_G = /(\+7|8)\s*\(?\s*\d{3}\s*\)?\s*[-\s]?\d{3}[-\s]?\d{2}[-\s]?\d{2}/g;
+const ONLY_DIGITS = /\d/g;
+
+function cleanNoise(text){
+  return (text||"")
+    .replace(/[•●◦∙·]/g," ")
+    .replace(/[©®™]/g," ")
+    .replace(/фио[:\s]*/gi," ")
+    .replace(/физлицо/gi," ")
+    .replace(/mobile/gi," ")
+    .replace(/[—–]+/g,"-")
+    .replace(/[\u200E\u200F\u00A0]/g," ")
+    .replace(/\s{2,}/g," ")
+    .trim();
+}
+
+function normalizePhone(raw){
+  const digits = raw.match(ONLY_DIGITS)?.join("") || "";
+  if(digits.length<10) return raw.trim();
+  let d = digits;
+  if(d.length===11 && d[0]==="8") d = "7"+d.slice(1);
+  if(d.length!==11) return raw.trim();
+  return "+7 " + d.slice(1,4) + " " + d.slice(4,7) + "-" + d.slice(7,9) + "-" + d.slice(9,11);
+}
+
+function parsePhones(text){
+  const seen = new Set();
+  const list = [];
+  for(const m of (text||"").matchAll(PHONE_RE_ANY_G)){
+    const ph = normalizePhone(m[0]);
+    const key = ph.replace(/\D/g,"");
+    if(!seen.has(key)){ seen.add(key); list.push(ph); }
+  }
+  return list.join(", ");
+}
+
+// Приводим путаемые латиницу→кириллицу и фикс артефактов OCR
+function toCyrLookalikes(s){
+  const map = {
+    A:"А", B:"В", C:"С", E:"Е", H:"Н", K:"К", M:"М", O:"О", P:"Р", T:"Т", X:"Х", Y:"У",
+    a:"а", b:"в", c:"с", e:"е", h:"н", k:"к", m:"м", o:"о", p:"р", t:"т", x:"х", y:"у"
+  };
+  return s.replace(/[ABCEHKMOPTXYabcehkmoptxy]/g, ch => map[ch] || ch);
+}
+
+function fixCyrConfusions(word){
+  let w = toCyrLookalikes(word);
+
+  // "Шщ" → "Щ"
+  w = w.replace(/Шщ|ШЩ/g, "Щ").replace(/шщ|шЩ/g, "щ");
+
+  // "ЙИ" → "И" (артефакт Tesseract)
+  w = w.replace(/ЙИ/gu, "И").replace(/йи/gu, "и");
+
+  // "З3" → "З" (цифра 3 вместо буквы З)
+  w = w.replace(/З3/g, "З").replace(/з3/g, "з");
+
+  // лишние дефисы/точки по краям
+  w = w.replace(/^[\.\-]+|[\.\-]+$/g, "");
+  return w;
+}
+
+function titlecaseRu(s){
+  return s.trim().split(/\s+/).map(p=>p? p[0].toUpperCase()+p.slice(1).toLowerCase():p).join(" ");
+}
+
+function parseFio(text){
+  const t = cleanNoise(text);
+  const tokens = t.split(/[^А-Яа-яЁё-]+/)
+    .map(w => w && fixCyrConfusions(w))
+    .filter(w => w && w.length >= 2);
+
+  const stop = /^(россия|город|улица|ул|область|край|район|рф|регион)$/i;
+
+  for(let i=0;i<tokens.length-1;i++){
+    const a=tokens[i], b=tokens[i+1], c=tokens[i+2];
+    if(stop.test(a)) continue;
+    if(c && a.length>=3 && b.length>=3 && c.length>=3) return titlecaseRu(a+" "+b+" "+c);
+    if(a.length>=3 && b.length>=3) return titlecaseRu(a+" "+b);
+  }
+  return "";
+}
+
+function isPhoneish(ln){
+  const digits = (ln||"").replace(/\D/g,"");
+  return /\+/.test(ln) || digits.length >= 10;
+}
+
+function looksLikeStreet(ln){
+  return /(?:ул\.?|улица|просп\.?|проспект|пер\.?|переулок|шоссе|ш\.|б-р|бульвар|тракт|мкр\.?|квартал|кв-л|проезд|дорога|пл\.?|площадь|наб\.?|набережная|аллея|пр-д|дом|д\.|корп\.?|стр\.?|кв\.|подъезд)/i.test(ln);
+}
+
+// Улучшенная версия: берем строки от "Россия" до первой пустой строки или максимум 6 строк
+function parseFullAddress(text){
+  const t = (text || "").replace(/\r/g, "");
+  const start = t.search(/Россия|РФ/i);
+  if (start < 0) {
+    // фолбэк: если нет "Россия" - берём первую уличную строку
+    const lines = t.split(/\n/).map(s=>s.trim()).filter(Boolean);
+    const firstStreet = lines.find(ln => looksLikeStreet(ln) && !isPhoneish(ln));
+    return (firstStreet || "").trim();
+  }
+
+  let tail = t.slice(start);
+  tail = tail.replace(/^РФ/i, "Россия");
+
+  // режем на строки
+  let parts = tail.split(/\n/).map(s => s.trim()).filter(Boolean);
+
+  // останавливаемся на первой пустой строке или после 6 строк
+  const limited = [];
+  for(let i=0; i<parts.length && i<6; i++){
+    const ln = parts[i];
+    // пропускаем телефоны и мусор
+    if(isPhoneish(ln)) continue;
+    if(/фио|mobile|мобил|заказ|телеф|клиент|получател/iu.test(ln)) continue;
+    limited.push(ln);
+  }
+
+  let full = limited.join(", ");
+
+  // уборка
+  full = full
+    .replace(/^Россия(?!\s*,)/i, "Россия,")
+    .replace(/\s*,\s*,/g, ", ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/,\s*$/,"")
+    .trim();
+
+  return full;
+}
+
+function parseOrder(raw, filename){
+  const cleaned = cleanNoise(raw);
+  const phone = parsePhones(cleaned);
+  const fio = parseFio(cleaned);
+  const addr = parseFullAddress(cleaned);
+
+  return {
+    "Файл":filename,
+    "ФИО":fio,
+    "Телефон":phone,
+    "Адрес":addr||"",
+    "Raw OCR":raw.trim()
+  };
+}
+
+// Валидация результатов парсинга
+function validateRow(row){
+  const warnings = [];
+
+  if(row["ФИО"] && (row["ФИО"].length < 2 || row["ФИО"].length > 60)){
+    warnings.push("ФИО: подозрительная длина");
+  }
+
+  if(row["Телефон"] && !row["Телефон"].startsWith("+7")){
+    warnings.push("Телефон: не начинается с +7");
+  }
+
+  if(row["Адрес"] && !row["Адрес"].match(/Россия/i)){
+    warnings.push("Адрес: нет 'Россия'");
+  }
+
+  if(!row["ФИО"] && !row["Телефон"] && !row["Адрес"]){
+    warnings.push("Пустой результат парсинга");
+  }
+
+  return warnings;
+}
+
+/* ===========================================================
+   Таблица: предпросмотр, редактирование, массовые операции
+   =========================================================== */
+function appendPreviewRow(r, warnings){
+  const tr=document.createElement("tr");
+  COLS.forEach((k,idx)=>{
+    const td=document.createElement("td");
+    td.textContent = r[k] ?? "";
+    if(idx!==0){ td.setAttribute("contenteditable","true"); }
+    td.addEventListener("dblclick", ()=> td.focus());
+    tr.appendChild(td);
+  });
+
+  // Подсветка строк с предупреждениями
+  if(warnings && warnings.length > 0){
+    tr.style.backgroundColor = "#fff3cd";
+    tr.title = warnings.join("; ");
+  }
+
+  previewBody.appendChild(tr);
+}
+
+function syncRowsFromTable(){
+  rows = Array.from(previewBody.querySelectorAll("tr")).map(tr=>{
+    const tds = tr.querySelectorAll("td");
+    const obj = {};
+    COLS.forEach((k,i)=> obj[k] = (tds[i]?.textContent || "").trim());
+    return obj;
+  });
+}
+
+clearColBtn.addEventListener("click", ()=>{
+  const idx = colSelect.selectedIndex;
+  if(idx===0){ alert("Столбец Файл очищать нельзя."); return; }
+  for(const tr of previewBody.querySelectorAll("tr")){
+    const td = tr.children[idx];
+    td.textContent = "";
+  }
+  syncRowsFromTable();
+});
+
+fillDownBtn.addEventListener("click", ()=>{
+  const idx = colSelect.selectedIndex;
+  if(idx===0){ alert("Столбец Файл копировать вниз не имеет смысла."); return; }
+  const trs = Array.from(previewBody.querySelectorAll("tr"));
+  if(trs.length<2) return;
+  const base = trs[0].children[idx].textContent;
+  const val = base || prompt("Введите значение, которое скопировать вниз:", "");
+  if(val===null) return;
+  for(let i=1;i<trs.length;i++){
+    trs[i].children[idx].textContent = val;
+  }
+  syncRowsFromTable();
+});
+
+previewBody.addEventListener("input", ()=> syncRowsFromTable());
+
+/* ===========================================================
+   Перепарсинг без повторного OCR
+   =========================================================== */
+reparseBtn.addEventListener("click", ()=>{
+  if(rows.length === 0) return;
+
+  log("Перепарсинг данных из Raw OCR...");
+  setStatus("Перепарсинг...");
+
+  // Сохраняем Raw OCR, заново парсим
+  const newRows = rows.map(r => {
+    const raw = r["Raw OCR"] || "";
+    const filename = r["Файл"] || "";
+    return parseOrder(raw, filename);
+  });
+
+  rows = newRows;
+  previewBody.innerHTML = "";
+
+  newRows.forEach(r => {
+    const warnings = validateRow(r);
+    appendPreviewRow(r, warnings);
+  });
+
+  setStatus("Перепарсинг завершен");
+  log(`Перепарсено строк: ${rows.length}`);
+});
+
+/* ===========================================================
+   Очередь OCR с лимитом параллельности и отменой
+   =========================================================== */
+let cancelFlag = false;
+
+async function createWorkerSafe(){
+  setStatus("Загружаю языки OCR...");
+  log("Загрузка языков rus+eng...");
+  const worker = await Tesseract.createWorker("rus+eng", 1, {
+    langPath: "https://tessdata.projectnaptha.com/4.0.0"
+  });
+  return worker;
+}
+
+async function recognizeWithFallback(worker, blob){
+  const base = await worker.recognize(blob, { tessedit_pageseg_mode:"6" });
+  let text = base?.data?.text || "";
+
+  if(!parsePhones(text)){
+    try{
+      const cfg = { tessedit_pageseg_mode:"6", tessedit_char_whitelist:"+() -0123456789" };
+      const phonePass = await worker.recognize(blob, cfg);
+      const p = parsePhones(phonePass?.data?.text || "");
+      if(p) text = (text + "\n" + p).trim();
+    }catch(e){ /* не критично */ }
+  }
+  return text;
+}
+
+async function runOCR(){
+  if(typeof Tesseract === "undefined" || !Tesseract.createWorker){
+    alert("Не удалось загрузить движок распознавания. Проверьте интернет на первый запуск.");
+    return;
+  }
+  if(!filesList.length){ alert("Добавьте изображения."); return; }
+
+  runBtn.disabled = true; reparseBtn.disabled = true; saveBtn.disabled = true; cancelBtn.disabled = false;
+  rows = []; previewBody.innerHTML = ""; prog(1); setStatus("Подготовка..."); logEl.textContent = "";
+
+  cancelFlag = false;
+  let processed = 0;
+  const total = filesList.length;
+  const conc = parseInt(concurrencySel.value,10) || 1;
+  const startTime = Date.now();
+
+  log(`Начало обработки: ${total} файлов, параллельность ${conc}`);
+
+  const workers = [];
+  try{
+    const needWorkers = conc;
+    for(let i=0;i<needWorkers;i++){ workers.push(await createWorkerSafe()); }
+  }catch(e){
+    alert("Языковые данные не загрузились. Нужен доступ к tessdata.projectnaptha.com или VPN.");
+    setStatus("Ошибка загрузки языков");
+    runBtn.disabled=false; cancelBtn.disabled=true;
+    return;
+  }
+
+  const tasks = filesList.map((file, idx)=>({file, idx}));
+  const results = new Array(tasks.length);
+
+  async function processTask(worker, task){
+    if(cancelFlag) return;
+    const {file, idx} = task;
+    try{
+      setStatus(`Предобработка: ${idx+1}/${total}`);
+      const blob = await preprocessToBlob(file);
+
+      setStatus(`Распознавание: ${idx+1}/${total}`);
+      const txt = await recognizeWithFallback(worker, blob);
+
+      const row = parseOrder(txt, file.name);
+      const warnings = validateRow(row);
+
+      results[idx] = row;
+      appendPreviewRow(row, warnings);
+
+      if(warnings.length > 0){
+        log(`${file.name}: ${warnings.join(", ")}`);
+      }
+    }catch(err){
+      results[idx] = {
+        "Файл": file.name,
+        "ФИО":"",
+        "Телефон":"",
+        "Адрес":"",
+        "Raw OCR":"Ошибка OCR: " + (err.message || err)
+      };
+      log(`Ошибка ${file.name}: ${err.message || err}`);
+    }finally{
+      processed++;
+      prog(Math.round((processed/total)*100));
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      const avgPerFile = (elapsed / processed).toFixed(1);
+      setStatus(`Готово: ${processed}/${total} (avg ${avgPerFile}s/файл)`);
+    }
+  }
+
+  let cursor = 0;
+  async function workerLoop(worker){
+    while(!cancelFlag && cursor < tasks.length){
+      const myTask = tasks[cursor++];
+      await processTask(worker, myTask);
+    }
+  }
+
+  await Promise.all(workers.map(w => workerLoop(w))).catch(()=>{});
+
+  for(const w of workers){
+    try{ await w.terminate(); }catch(e){}
+  }
+
+  if(cancelFlag){
+    setStatus("Остановлено пользователем");
+    log("Обработка остановлена. Можно перезапустить.");
+    runBtn.disabled = false; cancelBtn.disabled = true;
+    return;
+  }
+
+  rows = results.filter(Boolean);
+
+  const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+  const avgTime = (totalTime / total).toFixed(1);
+
+  setStatus(`Готово за ${totalTime}s`);
+  log(`Обработано: ${rows.length} файлов за ${totalTime}s (среднее ${avgTime}s/файл)`);
+
+  saveBtn.disabled = rows.length === 0;
+  reparseBtn.disabled = rows.length === 0;
+  runBtn.disabled = false;
+  cancelBtn.disabled = true;
+}
+
+cancelBtn.addEventListener("click", ()=>{ cancelFlag = true; cancelBtn.disabled = true; });
+
+/* ===========================================================
+   Экспорт в Excel
+   =========================================================== */
+function saveExcel(){
+  syncRowsFromTable();
+  if(!rows.length){ alert("Пока нечего сохранять."); return; }
+  const header = COLS;
+  const ws = XLSX.utils.json_to_sheet(rows, { header });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Orders");
+
+  const timestamp = new Date().toISOString().slice(0,19).replace(/:/g,"-");
+  XLSX.writeFile(wb, `orders_ocr_${timestamp}.xlsx`);
+
+  log(`Excel сохранен: orders_ocr_${timestamp}.xlsx`);
+}
+
+runBtn.addEventListener("click", runOCR);
+saveBtn.addEventListener("click", saveExcel);
+
+log("Приложение загружено. Выберите файлы и нажмите 'Распознать'.");
+</script>
+</body>
+</html>
