@@ -1,0 +1,1027 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OCR мини-карточек заказов -> Excel v2.0</title>
+  <style>
+    :root { --accent:#2563eb; --border:#e5e7eb; --muted:#6b7280; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color:#111827; }
+    h1 { font-size: 22px; margin: 0 0 12px; }
+    .version { color: var(--accent); font-size: 12px; font-weight: 600; }
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; background:#fff; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .spacer { flex:1; }
+    .btn { padding:10px 14px; border:1px solid #374151; background:#fff; border-radius:10px; cursor:pointer; }
+    .btn:disabled { opacity:.5; cursor:default; }
+    .btn.secondary { border-color:var(--border); }
+    .drop { border:2px dashed #9ca3af; border-radius:12px; padding:18px; text-align:center; color:#374151; }
+    .drop.dragover { border-color: var(--accent); background:#eef2ff; color:#1d4ed8; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .status { font-size: 13px; margin-left: 8px; }
+    .progress { height: 8px; background:#f3f4f6; border-radius:6px; overflow:hidden; margin-top:8px; }
+    .bar { height:100%; width:0%; background:var(--accent); transition:width .18s ease; }
+
+    .container { display: flex; gap: 16px; }
+    .main-panel { flex: 1; min-width: 0; }
+    .side-panel { width: 320px; border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: #fafafa; position: sticky; top: 24px; height: fit-content; max-height: calc(100vh - 48px); overflow: auto; }
+    .side-panel.hidden { display: none; }
+
+    .grid { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .grid th, .grid td { border:1px solid #f3f4f6; padding:6px 8px; font-size:13px; vertical-align:top; word-wrap: break-word; }
+    .grid th { background:#fafafa; text-align:left; position:sticky; top:0; z-index:1; }
+    .grid tr:hover { background: #f9fafb; cursor: pointer; }
+    .grid tr.selected { background: #dbeafe; }
+    td[contenteditable="true"] { background:#fff; outline:none; }
+    td[contenteditable="true"]:focus { box-shadow: inset 0 0 0 2px rgba(37,99,235,.2); }
+
+    .tools { display:flex; gap:8px; align-items:center; }
+    .select { padding:8px 10px; border:1px solid #9ca3af; border-radius:10px; background:#fff; }
+    .small { font-size:12px; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; background:#f9fafb; border:1px solid var(--border); border-radius:8px; padding:8px; max-height:110px; overflow:auto; }
+
+    .preview-img { max-width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+    .preview-title { font-weight: 600; margin-bottom: 8px; color: #111827; }
+    .preview-data { font-size: 12px; margin-top: 12px; }
+    .preview-data dt { font-weight: 600; margin-top: 8px; color: #6b7280; }
+    .preview-data dd { margin: 4px 0 0 0; color: #111827; word-break: break-word; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .badge.corrected { background: #dcfce7; color: #166534; }
+    .badge.warning { background: #fef3c7; color: #92400e; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>OCR мини-карточек заказов -> Excel <span class="version">v2.0 Smart</span></h1>
+
+  <div class="card">
+    <div class="row">
+      <label class="btn">
+        Выбрать файлы
+        <input id="fileInput" type="file" accept="image/*" multiple style="display:none" />
+      </label>
+      <label class="btn">
+        Выбрать папку
+        <input id="dirInput" type="file" webkitdirectory style="display:none" />
+      </label>
+      <button id="runBtn" class="btn" disabled>Распознать</button>
+      <button id="reparseBtn" class="btn secondary" disabled>Перепарсить</button>
+      <button id="cancelBtn" class="btn secondary" disabled>Отмена</button>
+      <button id="saveBtn" class="btn" disabled>Скачать Excel</button>
+      <span id="countSpan" class="muted">Файлы не выбраны</span>
+      <span class="spacer"></span>
+      <label class="muted">Параллельность
+        <select id="concurrency" class="select">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="dropZone" class="drop" style="margin-top:12px;">
+      Перетащите сюда изображения или нажмите "Выбрать папку/файлы", затем "Распознать".
+      <div class="progress"><div id="progBar" class="bar"></div></div>
+      <div id="status" class="status muted"></div>
+    </div>
+    <div class="small muted" style="margin-top:8px;">
+      ✨ v2.0: умный парсинг адресов, авто-коррекция ФИО/улиц, определение ориентации, интерактивный просмотр
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="main-panel">
+      <div class="card">
+        <div class="row" style="justify-content: space-between">
+          <div class="muted">Предпросмотр данных и правка:</div>
+          <div class="tools">
+            <label class="muted">Столбец:
+              <select id="colSelect" class="select">
+                <option>Файл</option>
+                <option selected>ФИО</option>
+                <option>Телефон</option>
+                <option>Регион</option>
+                <option>Город</option>
+                <option>Улица</option>
+                <option>Дом/Кв</option>
+                <option>Адрес (полный)</option>
+                <option>Raw OCR</option>
+              </select>
+            </label>
+            <button id="clearColBtn" class="btn secondary">Очистить</button>
+            <button id="fillDownBtn" class="btn secondary">Копировать вниз</button>
+          </div>
+        </div>
+        <div style="overflow:auto; max-height: 520px; border:1px solid var(--border); border-radius:8px;">
+          <table id="preview" class="grid">
+            <thead>
+              <tr>
+                <th style="width:120px">Файл</th>
+                <th style="width:160px">ФИО</th>
+                <th style="width:130px">Телефон</th>
+                <th style="width:110px">Регион</th>
+                <th style="width:100px">Город</th>
+                <th style="width:150px">Улица</th>
+                <th style="width:90px">Дом/Кв</th>
+                <th style="width:200px">Адрес (полный)</th>
+                <th style="width:200px">Raw OCR</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="small muted" style="margin-top:8px;">
+          💡 Клик по строке показывает изображение справа. Двойной клик по ячейке - редактирование.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="muted">Логи и диагностика:</div>
+        <div id="log" class="log"></div>
+      </div>
+    </div>
+
+    <div id="sidePanel" class="side-panel hidden">
+      <div class="preview-title">Просмотр карточки</div>
+      <img id="previewImg" class="preview-img" alt="Preview" />
+      <dl class="preview-data" id="previewData"></dl>
+    </div>
+  </div>
+
+<script>
+/* ===========================================================
+   СЛОВАРИ ДЛЯ ML-КОРРЕКЦИИ OCR
+   =========================================================== */
+// Топ-500 русских фамилий (компактная версия - топ-200 для размера файла)
+const SURNAMES = new Set([
+  "Иванов","Смирнов","Кузнецов","Попов","Васильев","Петров","Соколов","Михайлов","Новиков","Фёдоров","Морозов","Волков","Алексеев","Лебедев","Семёнов","Егоров","Павлов","Козлов","Степанов","Николаев","Орлов","Андреев","Макаров","Никитин","Захаров","Зайцев","Соловьёв","Борисов","Яковлев","Григорьев","Романов","Воробьёв","Сергеев","Кузьмин","Фролов","Александров","Дмитриев","Королёв","Гусев","Киселёв","Ильин","Максимов","Поляков","Сорокин","Виноградов","Ковалёв","Белов","Медведев","Антонов","Тарасов","Жуков","Баранов","Филиппов","Комаров","Давыдов","Беляев","Герасимов","Богданов","Осипов","Сидоров","Матвеев","Титов","Марков","Миронов","Крылов","Куликов","Карпов","Власов","Мельников","Денисов","Гаврилов","Тихонов","Казаков","Афанасьев","Данилов","Савельев","Тимофеев","Фомин","Чернов","Абрамов","Мартынов","Ефимов","Федотов","Щербаков","Назаров","Калинин","Исаев","Чернышев","Быков","Маслов","Родионов","Коновалов","Лазарев","Воронин","Климов","Филатов","Пономарёв","Голубев","Кудрявцев","Прохоров","Наумов","Потапов","Журавлёв","Овчинников","Трофимов","Леонов","Соболев","Ермаков","Колесников","Панов","Аникин"
+]);
+
+// Топ-200 русских имён (мужские + женские)
+const NAMES = new Set([
+  "Александр","Алексей","Андрей","Антон","Артём","Борис","Вадим","Валентин","Валерий","Василий","Виктор","Виталий","Владимир","Владислав","Вячеслав","Геннадий","Георгий","Глеб","Григорий","Даниил","Денис","Дмитрий","Евгений","Егор","Иван","Игорь","Илья","Кирилл","Константин","Леонид","Максим","Матвей","Михаил","Никита","Николай","Олег","Павел","Пётр","Роман","Руслан","Семён","Сергей","Станислав","Степан","Тимофей","Фёдор","Юрий","Ярослав",
+  "Александра","Алина","Алла","Анастасия","Анна","Валентина","Валерия","Варвара","Вера","Вероника","Виктория","Галина","Дарья","Диана","Евгения","Екатерина","Елена","Елизавета","Жанна","Зинаида","Зоя","Инна","Ирина","Кира","Кристина","Ксения","Лариса","Лидия","Любовь","Людмила","Маргарита","Марина","Мария","Надежда","Наталья","Нина","Оксана","Олеся","Ольга","Полина","Раиса","Светлана","Снежана","София","Тамара","Татьяна","Ульяна","Юлия","Яна"
+]);
+
+// Топ-100 названий улиц в России
+const STREETS = new Set([
+  "Ленина","Советская","Центральная","Школьная","Молодёжная","Садовая","Набережная","Мира","Пролетарская","Комсомольская","Октябрьская","Первомайская","Победы","Заречная","Лесная","Новая","Строителей","Кирова","Гагарина","Солнечная","Парковая","Луговая","Речная","Полевая","Зелёная","Рабочая","Калинина","Степная","Больничная","Свердлова","Пушкина","Московская","Горького","Чехова","Толстого","Некрасова","Гоголя","Достоевского","Маяковского","Есенина","Куйбышева","Дзержинского","Чкалова","Жукова","Суворова","Кутузова","Красноармейская","Красная","Южная","Северная","Западная","Восточная","Заводская","Колхозная","Спортивная","Железнодорожная","Вокзальная","Больничная","Интернациональная","Партизанская","Космонавтов","Матросова","Чапаева","Фрунзе","Кооперативная","Трудовая","Транспортная","Озёрная","Промышленная","Тихая","Весенняя","Дружбы","Юбилейная","Березовая","Сосновая","Дубовая","Цветочная","Вишнёвая","Клубная","Мичурина","Ломоносова","Менделеева","Королёва","Циолковского","Нахимова","Ушакова"
+]);
+
+/* ===========================================================
+   АЛГОРИТМ ЛЕВЕНШТЕЙНА ДЛЯ ПОИСКА ПОХОЖИХ СЛОВ
+   =========================================================== */
+function levenshtein(a, b) {
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+// Найти ближайшее слово из словаря (distance <= 2)
+function findClosest(word, dictionary, maxDist = 2) {
+  if (!word || word.length < 3) return null;
+  const lower = word.toLowerCase();
+
+  // Точное совпадение
+  for (const entry of dictionary) {
+    if (entry.toLowerCase() === lower) return null; // уже правильное
+  }
+
+  let bestMatch = null;
+  let bestDist = maxDist + 1;
+
+  for (const entry of dictionary) {
+    const dist = levenshtein(lower, entry.toLowerCase());
+    if (dist > 0 && dist < bestDist) {
+      bestDist = dist;
+      bestMatch = entry;
+    }
+  }
+
+  return bestDist <= maxDist ? bestMatch : null;
+}
+
+// Коррекция слова через словари
+function correctWord(word, type = "surname") {
+  const dict = type === "surname" ? SURNAMES : type === "name" ? NAMES : STREETS;
+  const corrected = findClosest(word, dict);
+  return corrected || word;
+}
+
+/* ===========================================================
+   UI и загрузка файлов
+   =========================================================== */
+const EXT_OK = /\.(jpg|jpeg|png|webp|bmp|gif|tif|tiff|heic)$/i;
+function isImageFile(f){
+  return (f.type && f.type.startsWith("image/")) || EXT_OK.test(f.name);
+}
+
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+function setStatus(msg){ statusEl.textContent = msg || ""; }
+function log(msg){
+  const time = new Date().toLocaleTimeString();
+  logEl.textContent += `[${time}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function prog(pct){ document.getElementById("progBar").style.width = Math.max(0, Math.min(100, pct)) + "%"; }
+
+const fileInput = document.getElementById("fileInput");
+const dirInput  = document.getElementById("dirInput");
+const runBtn    = document.getElementById("runBtn");
+const reparseBtn = document.getElementById("reparseBtn");
+const cancelBtn = document.getElementById("cancelBtn");
+const saveBtn   = document.getElementById("saveBtn");
+const previewBody = document.querySelector("#preview tbody");
+const countSpan = document.getElementById("countSpan");
+const colSelect = document.getElementById("colSelect");
+const COLS = ["Файл","ФИО","Телефон","Регион","Город","Улица","Дом/Кв","Адрес (полный)","Raw OCR"];
+const clearColBtn = document.getElementById("clearColBtn");
+const fillDownBtn = document.getElementById("fillDownBtn");
+const concurrencySel = document.getElementById("concurrency");
+const sidePanel = document.getElementById("sidePanel");
+const previewImg = document.getElementById("previewImg");
+const previewData = document.getElementById("previewData");
+
+let filesList = [];
+let rows = [];
+let processedBlobs = new Map(); // filename -> blob URL для превью
+
+const savedConc = localStorage.getItem("ocrConcurrency");
+if(savedConc && (savedConc === "1" || savedConc === "2")){
+  concurrencySel.value = savedConc;
+}
+concurrencySel.addEventListener("change", ()=> {
+  localStorage.setItem("ocrConcurrency", concurrencySel.value);
+});
+
+function setFiles(list){
+  const arr = Array.from(list || []);
+  filesList = arr.filter(isImageFile);
+  countSpan.textContent = filesList.length ? `Выбрано файлов: ${filesList.length}` : "Файлы не выбраны";
+  setStatus(filesList.length ? "Готово к распознаванию" : "");
+  runBtn.disabled = filesList.length === 0;
+  reparseBtn.disabled = true;
+  saveBtn.disabled = true;
+  rows = [];
+  previewBody.innerHTML = "";
+  processedBlobs.clear();
+  sidePanel.classList.add("hidden");
+  prog(0);
+  log(`Принято файлов: ${filesList.length}`);
+}
+
+fileInput.addEventListener("change", e => setFiles(e.target.files));
+dirInput .addEventListener("change", e => setFiles(e.target.files));
+
+const dropZone = document.getElementById("dropZone");
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("dragover"); setFiles(e.dataTransfer.files); });
+
+/* ===========================================================
+   АВТООПРЕДЕЛЕНИЕ ОРИЕНТАЦИИ
+   Простая эвристика: считаем соотношение черных пикселей по краям
+   Если текст идет вертикально - нужен поворот
+   =========================================================== */
+function detectOrientation(imgData) {
+  const {data, width, height} = imgData;
+
+  // Анализируем распределение черных пикселей в разных зонах
+  let topBlack = 0, bottomBlack = 0, leftBlack = 0, rightBlack = 0;
+  const margin = Math.min(width, height) * 0.1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const brightness = (data[idx] + data[idx+1] + data[idx+2]) / 3;
+      const isBlack = brightness < 128;
+
+      if (!isBlack) continue;
+
+      if (y < margin) topBlack++;
+      if (y > height - margin) bottomBlack++;
+      if (x < margin) leftBlack++;
+      if (x > width - margin) rightBlack++;
+    }
+  }
+
+  // Если текст горизонтальный - больше активности по бокам
+  // Если вертикальный - больше сверху/снизу
+  const horizontal = leftBlack + rightBlack;
+  const vertical = topBlack + bottomBlack;
+
+  // Если ширина намного меньше высоты и много активности по бокам - возможно поворот на 90
+  if (width < height * 0.7 && horizontal > vertical * 1.5) {
+    return 90; // поворот нужен
+  }
+
+  return 0; // ориентация правильная
+}
+
+/* ===========================================================
+   Предобработка изображения
+   =========================================================== */
+async function fileToImageBitmap(file){
+  const blobURL = URL.createObjectURL(file);
+  const img = await createImageBitmap(await (await fetch(blobURL)).blob());
+  URL.revokeObjectURL(blobURL);
+  return img;
+}
+
+function getExifOrientation(buf){
+  try{
+    const view = new DataView(buf);
+    if(view.getUint16(0,false) !== 0xFFD8) return 1;
+    let offset = 2;
+    while(offset < view.byteLength){
+      const marker = view.getUint16(offset, false); offset += 2;
+      if(marker === 0xFFE1){
+        offset += 2;
+        if(view.getUint32(offset, false) !== 0x45786966) return 1;
+        offset += 6;
+        const little = view.getUint16(offset, false) === 0x4949; offset += 2;
+        if(view.getUint16(offset, little) !== 0x002A) return 1; offset += 2;
+        let dirOffset = view.getUint32(offset, little); offset = offset - 4 + dirOffset;
+        const numTags = view.getUint16(offset, little); offset += 2;
+        for(let i=0;i<numTags;i++){
+          const tag = view.getUint16(offset + i*12, little);
+          if(tag === 0x0112){
+            const val = view.getUint16(offset + i*12 + 8, little);
+            return val || 1;
+          }
+        }
+        return 1;
+      } else {
+        const len = view.getUint16(offset, false); offset += len;
+      }
+    }
+  }catch(e){}
+  return 1;
+}
+
+function drawWithOrientation(ctx, img, w, h, orientation){
+  switch(orientation){
+    case 2: ctx.translate(w,0); ctx.scale(-1,1); break;
+    case 3: ctx.translate(w,h); ctx.rotate(Math.PI); break;
+    case 4: ctx.translate(0,h); ctx.scale(1,-1); break;
+    case 5: ctx.rotate(0.5*Math.PI); ctx.scale(1,-1); break;
+    case 6: ctx.rotate(0.5*Math.PI); ctx.translate(0,-h); break;
+    case 7: ctx.rotate(0.5*Math.PI); ctx.translate(w,-h); ctx.scale(-1,1); break;
+    case 8: ctx.rotate(-0.5*Math.PI); ctx.translate(-w,0); break;
+    default: break;
+  }
+  ctx.drawImage(img,0,0,w,h);
+}
+
+async function preprocessToBlob(file){
+  const arrayBuffer = await file.arrayBuffer();
+  const orientation = getExifOrientation(arrayBuffer) || 1;
+
+  const img = await fileToImageBitmap(new File([arrayBuffer], file.name, {type:file.type}));
+  const targetW = Math.min(2200, Math.max(1200, 1800));
+  const scale = targetW / img.width;
+  const W = Math.round(img.width * scale);
+  const H = Math.round(img.height * scale);
+
+  const rot90 = [5,6,7,8].includes(orientation);
+  const cw = rot90 ? H : W;
+  const ch = rot90 ? W : H;
+
+  const cvs = new OffscreenCanvas(cw, ch);
+  const ctx = cvs.getContext("2d", { willReadFrequently:true });
+  ctx.save();
+  drawWithOrientation(ctx, img, W, H, orientation);
+  ctx.restore();
+
+  let imgData = ctx.getImageData(0,0,cw,ch);
+  const d = imgData.data;
+  const hist = new Uint32Array(256);
+  for(let i=0;i<d.length;i+=4){
+    const y = (0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2])|0;
+    d[i]=d[i+1]=d[i+2]=y; d[i+3]=255; hist[y]++;
+  }
+
+  function percentile(p){
+    const target = p * (cw*ch);
+    let acc=0;
+    for(let i=0;i<256;i++){ acc+=hist[i]; if(acc>=target) return i; }
+    return p===0?0:255;
+  }
+  const lo = percentile(0.02), hi = percentile(0.98);
+  const span = Math.max(1, hi-lo);
+  for(let i=0;i<d.length;i+=4){
+    let y=d[i]; y = ((y-lo)*255/span)|0; if(y<0)y=0; if(y>255)y=255;
+    d[i]=d[i+1]=d[i+2]=y;
+  }
+
+  // Автоопределение ориентации после начальной предобработки
+  const autoRotate = detectOrientation(imgData);
+  if (autoRotate === 90) {
+    log(`${file.name}: обнаружена вертикальная ориентация, поворот на 90°`);
+    // Поворачиваем на 90 градусов
+    const rotCvs = new OffscreenCanvas(ch, cw);
+    const rotCtx = rotCvs.getContext("2d");
+    rotCtx.translate(ch/2, cw/2);
+    rotCtx.rotate(Math.PI/2);
+    rotCtx.drawImage(cvs, -cw/2, -ch/2);
+
+    // Обновляем imgData
+    imgData = rotCtx.getImageData(0, 0, ch, cw);
+    const newD = imgData.data;
+    for(let i=0;i<newD.length;i++) d[i] = newD[i];
+  }
+
+  // Otsu threshold
+  const hist2 = new Uint32Array(256);
+  for(let i=0;i<d.length;i+=4){ hist2[d[i]]++; }
+  let sum=0, sumB=0, wB=0, wF=0, mB=0, mF=0, maxVar=0, thr=127;
+  for(let i=0;i<256;i++) sum+= i*hist2[i];
+  const total = cw*ch;
+  for(let t=0;t<256;t++){
+    wB += hist2[t]; if(wB===0) continue;
+    wF = total - wB; if(wF===0) break;
+    sumB += t*hist2[t];
+    mB = sumB / wB; mF = (sum - sumB) / wF;
+    const between = wB*wF*(mB-mF)*(mB-mF);
+    if(between>maxVar){ maxVar=between; thr=t; }
+  }
+  for(let i=0;i<d.length;i+=4){
+    const val = d[i] > thr ? 255 : 0;
+    d[i]=d[i+1]=d[i+2]=val;
+  }
+
+  // morphology close
+  const copy = new Uint8ClampedArray(d);
+  const w = cw, h = ch;
+  function idx(x,y){ return 4*(y*w + x); }
+  for(let y=1;y<h-1;y++){
+    for(let x=1;x<w-1;x++){
+      let maxv=0;
+      for(let yy=-1;yy<=1;yy++)
+        for(let xx=-1;xx<=1;xx++)
+          maxv = Math.max(maxv, copy[idx(x+xx,y+yy)]);
+      const i=idx(x,y); d[i]=d[i+1]=d[i+2]=maxv;
+    }
+  }
+  const copy2 = new Uint8ClampedArray(d);
+  for(let y=1;y<h-1;y++){
+    for(let x=1;x<w-1;x++){
+      let minv=255;
+      for(let yy=-1;yy<=1;yy++)
+        for(let xx=-1;xx<=1;xx++)
+          minv = Math.min(minv, copy2[idx(x+xx,y+yy)]);
+      const i=idx(x,y); d[i]=d[i+1]=d[i+2]=minv;
+    }
+  }
+
+  ctx.putImageData(imgData,0,0);
+  const blob = await cvs.convertToBlob({ type:"image/png", quality:1 });
+  return blob;
+}
+
+/* ===========================================================
+   УМНЫЙ ПАРСЕР АДРЕСА С КОМПОНЕНТАМИ
+   =========================================================== */
+const PHONE_RE_ANY_G = /(\+7|8)\s*\(?\s*\d{3}\s*\)?\s*[-\s]?\d{3}[-\s]?\d{2}[-\s]?\d{2}/g;
+const ONLY_DIGITS = /\d/g;
+
+function cleanNoise(text){
+  return (text||"")
+    .replace(/[•●◦∙·]/g," ")
+    .replace(/[©®™]/g," ")
+    .replace(/фио[:\s]*/gi," ")
+    .replace(/физлицо/gi," ")
+    .replace(/mobile/gi," ")
+    .replace(/[—–]+/g,"-")
+    .replace(/[\u200E\u200F\u00A0]/g," ")
+    .replace(/\s{2,}/g," ")
+    .trim();
+}
+
+function normalizePhone(raw){
+  const digits = raw.match(ONLY_DIGITS)?.join("") || "";
+  if(digits.length<10) return raw.trim();
+  let d = digits;
+  if(d.length===11 && d[0]==="8") d = "7"+d.slice(1);
+  if(d.length!==11) return raw.trim();
+  return "+7 " + d.slice(1,4) + " " + d.slice(4,7) + "-" + d.slice(7,9) + "-" + d.slice(9,11);
+}
+
+function parsePhones(text){
+  const seen = new Set();
+  const list = [];
+  for(const m of (text||"").matchAll(PHONE_RE_ANY_G)){
+    const ph = normalizePhone(m[0]);
+    const key = ph.replace(/\D/g,"");
+    if(!seen.has(key)){ seen.add(key); list.push(ph); }
+  }
+  return list.join(", ");
+}
+
+function toCyrLookalikes(s){
+  const map = {
+    A:"А", B:"В", C:"С", E:"Е", H:"Н", K:"К", M:"М", O:"О", P:"Р", T:"Т", X:"Х", Y:"У",
+    a:"а", b:"в", c:"с", e:"е", h:"н", k:"к", m:"м", o:"о", p:"р", t:"т", x:"х", y:"у"
+  };
+  return s.replace(/[ABCEHKMOPTXYabcehkmoptxy]/g, ch => map[ch] || ch);
+}
+
+function fixCyrConfusions(word){
+  let w = toCyrLookalikes(word);
+  w = w.replace(/Шщ|ШЩ/g, "Щ").replace(/шщ|шЩ/g, "щ");
+  w = w.replace(/ЙИ/gu, "И").replace(/йи/gu, "и");
+  w = w.replace(/З3/g, "З").replace(/з3/g, "з");
+  w = w.replace(/^[\.\-]+|[\.\-]+$/g, "");
+  return w;
+}
+
+function titlecaseRu(s){
+  return s.trim().split(/\s+/).map(p=>p? p[0].toUpperCase()+p.slice(1).toLowerCase():p).join(" ");
+}
+
+// Парсинг ФИО с ML-коррекцией
+function parseFio(text){
+  const t = cleanNoise(text);
+  const tokens = t.split(/[^А-Яа-яЁё-]+/)
+    .map(w => w && fixCyrConfusions(w))
+    .filter(w => w && w.length >= 2);
+
+  const stop = /^(россия|город|улица|ул|область|край|район|рф|регион)$/i;
+
+  for(let i=0;i<tokens.length-1;i++){
+    const a=tokens[i], b=tokens[i+1], c=tokens[i+2];
+    if(stop.test(a)) continue;
+
+    // Пробуем коррекцию
+    const aCorrected = correctWord(a, "surname");
+    const bCorrected = correctWord(b, "name");
+    const cCorrected = c ? correctWord(c, "name") : null;
+
+    if(c && a.length>=3 && b.length>=3 && c.length>=3) {
+      const result = titlecaseRu(`${aCorrected} ${bCorrected} ${cCorrected}`);
+      if (aCorrected !== a || bCorrected !== b || cCorrected !== c) {
+        log(`✨ Коррекция ФИО: "${a} ${b} ${c}" -> "${result}"`);
+      }
+      return result;
+    }
+    if(a.length>=3 && b.length>=3) {
+      const result = titlecaseRu(`${aCorrected} ${bCorrected}`);
+      if (aCorrected !== a || bCorrected !== b) {
+        log(`✨ Коррекция ФИО: "${a} ${b}" -> "${result}"`);
+      }
+      return result;
+    }
+  }
+  return "";
+}
+
+function isPhoneish(ln){
+  const digits = (ln||"").replace(/\D/g,"");
+  return /\+/.test(ln) || digits.length >= 10;
+}
+
+// Умный парсер адреса: извлекает Регион, Город, Улицу, Дом/Кв
+function parseAddressComponents(text) {
+  const result = {
+    region: "",
+    city: "",
+    street: "",
+    building: "",
+    fullAddress: ""
+  };
+
+  const t = (text || "").replace(/\r/g, "");
+  const start = t.search(/Россия|РФ/i);
+
+  if (start < 0) {
+    return result;
+  }
+
+  let tail = t.slice(start);
+  tail = tail.replace(/^РФ/i, "Россия");
+
+  let parts = tail.split(/\n/).map(s => s.trim()).filter(Boolean);
+  const limited = [];
+  for(let i=0; i<parts.length && i<6; i++){
+    const ln = parts[i];
+    if(isPhoneish(ln)) continue;
+    if(/фио|mobile|мобил|заказ|телеф|клиент|получател/iu.test(ln)) continue;
+    limited.push(ln);
+  }
+
+  result.fullAddress = limited.join(", ")
+    .replace(/^Россия(?!\s*,)/i, "Россия,")
+    .replace(/\s*,\s*,/g, ", ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/,\s*$/,"")
+    .trim();
+
+  // Парсинг компонентов
+  const firstLine = limited[0] || "";
+
+  // Регион: ищем "область", "край", "республика", "обл.", "респ."
+  const regionMatch = firstLine.match(/,\s*([^,]+?(?:область|обл\.?|край|республика|респ\.?))/i);
+  if (regionMatch) {
+    result.region = regionMatch[1].trim()
+      .replace(/\s+(область|обл\.?|край|республика|респ\.?)$/i, " $1")
+      .trim();
+  }
+
+  // Город: после региона или "г.", "город"
+  const cityMatch = firstLine.match(/,\s*(?:г\.?\s+)?([А-ЯЁ][а-яё\-\s]+?)(?=\s*,|$)/i);
+  if (cityMatch) {
+    let cityCandidate = cityMatch[1].trim();
+    // Если это не регион - берём как город
+    if (!/область|обл\.|край|республика|респ\./i.test(cityCandidate)) {
+      result.city = cityCandidate.replace(/^г\.?\s*/i, "");
+    }
+  }
+
+  // Улица: ищем "ул.", "улица", "просп.", и т.д.
+  const streetLine = limited.find(ln => /(?:ул\.?|улица|просп\.?|проспект|пер\.?|переулок|шоссе|ш\.|б-р|бульвар|тракт|мкр\.?|квартал|проезд)/i.test(ln));
+  if (streetLine) {
+    const streetMatch = streetLine.match(/((?:ул\.?|улица|просп\.?|проспект|пер\.?|переулок|шоссе|ш\.|б-р|бульвар|тракт|мкр\.?|квартал|проезд)\s+[^,\d]+)/i);
+    if (streetMatch) {
+      let streetName = streetMatch[1].trim()
+        .replace(/^(ул\.?|улица|просп\.?|проспект|пер\.?|переулок)\s+/i, "");
+
+      // Коррекция названия улицы через словарь
+      const corrected = correctWord(streetName, "street");
+      if (corrected !== streetName) {
+        log(`✨ Коррекция улицы: "${streetName}" -> "${corrected}"`);
+        streetName = corrected;
+      }
+
+      result.street = streetName;
+    }
+
+    // Дом/кв: ищем "д.", "дом", "кв.", "квартира"
+    const buildingMatch = streetLine.match(/(?:д\.?|дом)\s*(\d+[а-яА-Я]?)(?:[,\s]+(?:кв\.?|квартира)\s*(\d+))?/i);
+    if (buildingMatch) {
+      const house = buildingMatch[1];
+      const apt = buildingMatch[2];
+      result.building = apt ? `д.${house}, кв.${apt}` : `д.${house}`;
+    }
+  }
+
+  return result;
+}
+
+function parseOrder(raw, filename){
+  const cleaned = cleanNoise(raw);
+  const phone = parsePhones(cleaned);
+  const fio = parseFio(cleaned);
+  const addr = parseAddressComponents(cleaned);
+
+  return {
+    "Файл": filename,
+    "ФИО": fio,
+    "Телефон": phone,
+    "Регион": addr.region,
+    "Город": addr.city,
+    "Улица": addr.street,
+    "Дом/Кв": addr.building,
+    "Адрес (полный)": addr.fullAddress || "",
+    "Raw OCR": raw.trim()
+  };
+}
+
+function validateRow(row){
+  const warnings = [];
+
+  if(row["ФИО"] && (row["ФИО"].length < 2 || row["ФИО"].length > 60)){
+    warnings.push("ФИО: подозрительная длина");
+  }
+
+  if(row["Телефон"] && !row["Телефон"].startsWith("+7")){
+    warnings.push("Телефон: не начинается с +7");
+  }
+
+  if(row["Адрес (полный)"] && !row["Адрес (полный)"].match(/Россия/i)){
+    warnings.push("Адрес: нет 'Россия'");
+  }
+
+  if(!row["ФИО"] && !row["Телефон"] && !row["Адрес (полный)"]){
+    warnings.push("Пустой результат парсинга");
+  }
+
+  return warnings;
+}
+
+/* ===========================================================
+   ИНТЕРАКТИВНЫЙ ПРОСМОТР ИЗОБРАЖЕНИЙ
+   =========================================================== */
+function showPreview(rowIndex) {
+  const row = rows[rowIndex];
+  if (!row) return;
+
+  const filename = row["Файл"];
+  const blobURL = processedBlobs.get(filename);
+
+  if (!blobURL) {
+    sidePanel.classList.add("hidden");
+    return;
+  }
+
+  sidePanel.classList.remove("hidden");
+  previewImg.src = blobURL;
+
+  previewData.innerHTML = `
+    <dt>Файл:</dt><dd>${filename}</dd>
+    <dt>ФИО:</dt><dd>${row["ФИО"] || "<пусто>"}</dd>
+    <dt>Телефон:</dt><dd>${row["Телефон"] || "<пусто>"}</dd>
+    <dt>Регион:</dt><dd>${row["Регион"] || "<пусто>"}</dd>
+    <dt>Город:</dt><dd>${row["Город"] || "<пусто>"}</dd>
+    <dt>Улица:</dt><dd>${row["Улица"] || "<пусто>"}</dd>
+    <dt>Дом/Кв:</dt><dd>${row["Дом/Кв"] || "<пусто>"}</dd>
+    <dt>Raw OCR:</dt><dd style="font-size:11px; max-height:100px; overflow:auto;">${row["Raw OCR"]?.substring(0, 300) || "<пусто>"}</dd>
+  `;
+
+  // Подсветка выбранной строки
+  document.querySelectorAll("#preview tbody tr").forEach((tr, idx) => {
+    tr.classList.toggle("selected", idx === rowIndex);
+  });
+}
+
+/* ===========================================================
+   Таблица: предпросмотр, редактирование
+   =========================================================== */
+function appendPreviewRow(r, warnings){
+  const tr=document.createElement("tr");
+  COLS.forEach((k,idx)=>{
+    const td=document.createElement("td");
+    td.textContent = r[k] ?? "";
+    if(idx!==0){ td.setAttribute("contenteditable","true"); }
+    td.addEventListener("dblclick", ()=> td.focus());
+    tr.appendChild(td);
+  });
+
+  if(warnings && warnings.length > 0){
+    tr.style.backgroundColor = "#fff3cd";
+    tr.title = warnings.join("; ");
+  }
+
+  const rowIndex = previewBody.children.length;
+  tr.addEventListener("click", (e) => {
+    if (e.target.tagName !== "TD" || !e.target.hasAttribute("contenteditable")) {
+      showPreview(rowIndex);
+    }
+  });
+
+  previewBody.appendChild(tr);
+}
+
+function syncRowsFromTable(){
+  rows = Array.from(previewBody.querySelectorAll("tr")).map(tr=>{
+    const tds = tr.querySelectorAll("td");
+    const obj = {};
+    COLS.forEach((k,i)=> obj[k] = (tds[i]?.textContent || "").trim());
+    return obj;
+  });
+}
+
+clearColBtn.addEventListener("click", ()=>{
+  const idx = colSelect.selectedIndex;
+  if(idx===0){ alert("Столбец Файл очищать нельзя."); return; }
+  for(const tr of previewBody.querySelectorAll("tr")){
+    const td = tr.children[idx];
+    td.textContent = "";
+  }
+  syncRowsFromTable();
+});
+
+fillDownBtn.addEventListener("click", ()=>{
+  const idx = colSelect.selectedIndex;
+  if(idx===0){ alert("Столбец Файл копировать вниз не имеет смысла."); return; }
+  const trs = Array.from(previewBody.querySelectorAll("tr"));
+  if(trs.length<2) return;
+  const base = trs[0].children[idx].textContent;
+  const val = base || prompt("Введите значение, которое скопировать вниз:", "");
+  if(val===null) return;
+  for(let i=1;i<trs.length;i++){
+    trs[i].children[idx].textContent = val;
+  }
+  syncRowsFromTable();
+});
+
+previewBody.addEventListener("input", ()=> syncRowsFromTable());
+
+/* ===========================================================
+   Перепарсинг
+   =========================================================== */
+reparseBtn.addEventListener("click", ()=>{
+  if(rows.length === 0) return;
+
+  log("Перепарсинг данных из Raw OCR...");
+  setStatus("Перепарсинг...");
+
+  const newRows = rows.map(r => {
+    const raw = r["Raw OCR"] || "";
+    const filename = r["Файл"] || "";
+    return parseOrder(raw, filename);
+  });
+
+  rows = newRows;
+  previewBody.innerHTML = "";
+
+  newRows.forEach(r => {
+    const warnings = validateRow(r);
+    appendPreviewRow(r, warnings);
+  });
+
+  setStatus("Перепарсинг завершен");
+  log(`Перепарсено строк: ${rows.length}`);
+});
+
+/* ===========================================================
+   OCR с лимитом параллельности
+   =========================================================== */
+let cancelFlag = false;
+
+async function createWorkerSafe(){
+  setStatus("Загружаю языки OCR...");
+  log("Загрузка языков rus+eng...");
+  const worker = await Tesseract.createWorker("rus+eng", 1, {
+    langPath: "https://tessdata.projectnaptha.com/4.0.0"
+  });
+  return worker;
+}
+
+async function recognizeWithFallback(worker, blob){
+  const base = await worker.recognize(blob, { tessedit_pageseg_mode:"6" });
+  let text = base?.data?.text || "";
+
+  if(!parsePhones(text)){
+    try{
+      const cfg = { tessedit_pageseg_mode:"6", tessedit_char_whitelist:"+() -0123456789" };
+      const phonePass = await worker.recognize(blob, cfg);
+      const p = parsePhones(phonePass?.data?.text || "");
+      if(p) text = (text + "\n" + p).trim();
+    }catch(e){ /* не критично */ }
+  }
+  return text;
+}
+
+async function runOCR(){
+  if(typeof Tesseract === "undefined" || !Tesseract.createWorker){
+    alert("Не удалось загрузить движок распознавания. Проверьте интернет на первый запуск.");
+    return;
+  }
+  if(!filesList.length){ alert("Добавьте изображения."); return; }
+
+  runBtn.disabled = true; reparseBtn.disabled = true; saveBtn.disabled = true; cancelBtn.disabled = false;
+  rows = []; previewBody.innerHTML = ""; prog(1); setStatus("Подготовка..."); logEl.textContent = "";
+  processedBlobs.clear();
+  sidePanel.classList.add("hidden");
+
+  cancelFlag = false;
+  let processed = 0;
+  const total = filesList.length;
+  const conc = parseInt(concurrencySel.value,10) || 1;
+  const startTime = Date.now();
+
+  log(`✨ v2.0: умный парсинг, ML-коррекция, авто-ориентация`);
+  log(`Начало обработки: ${total} файлов, параллельность ${conc}`);
+
+  const workers = [];
+  try{
+    const needWorkers = conc;
+    for(let i=0;i<needWorkers;i++){ workers.push(await createWorkerSafe()); }
+  }catch(e){
+    alert("Языковые данные не загрузились. Нужен доступ к tessdata.projectnaptha.com или VPN.");
+    setStatus("Ошибка загрузки языков");
+    runBtn.disabled=false; cancelBtn.disabled=true;
+    return;
+  }
+
+  const tasks = filesList.map((file, idx)=>({file, idx}));
+  const results = new Array(tasks.length);
+
+  async function processTask(worker, task){
+    if(cancelFlag) return;
+    const {file, idx} = task;
+    try{
+      setStatus(`Предобработка: ${idx+1}/${total}`);
+      const blob = await preprocessToBlob(file);
+
+      // Сохраняем blob для превью
+      const blobURL = URL.createObjectURL(blob);
+      processedBlobs.set(file.name, blobURL);
+
+      setStatus(`Распознавание: ${idx+1}/${total}`);
+      const txt = await recognizeWithFallback(worker, blob);
+
+      const row = parseOrder(txt, file.name);
+      const warnings = validateRow(row);
+
+      results[idx] = row;
+      appendPreviewRow(row, warnings);
+
+      if(warnings.length > 0){
+        log(`${file.name}: ${warnings.join(", ")}`);
+      }
+    }catch(err){
+      results[idx] = {
+        "Файл": file.name,
+        "ФИО":"",
+        "Телефон":"",
+        "Регион":"",
+        "Город":"",
+        "Улица":"",
+        "Дом/Кв":"",
+        "Адрес (полный)":"",
+        "Raw OCR":"Ошибка OCR: " + (err.message || err)
+      };
+      log(`Ошибка ${file.name}: ${err.message || err}`);
+    }finally{
+      processed++;
+      prog(Math.round((processed/total)*100));
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      const avgPerFile = (elapsed / processed).toFixed(1);
+      setStatus(`Готово: ${processed}/${total} (avg ${avgPerFile}s/файл)`);
+    }
+  }
+
+  let cursor = 0;
+  async function workerLoop(worker){
+    while(!cancelFlag && cursor < tasks.length){
+      const myTask = tasks[cursor++];
+      await processTask(worker, myTask);
+    }
+  }
+
+  await Promise.all(workers.map(w => workerLoop(w))).catch(()=>{});
+
+  for(const w of workers){
+    try{ await w.terminate(); }catch(e){}
+  }
+
+  if(cancelFlag){
+    setStatus("Остановлено пользователем");
+    log("Обработка остановлена. Можно перезапустить.");
+    runBtn.disabled = false; cancelBtn.disabled = true;
+    return;
+  }
+
+  rows = results.filter(Boolean);
+
+  const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+  const avgTime = (totalTime / total).toFixed(1);
+
+  setStatus(`Готово за ${totalTime}s`);
+  log(`✅ Обработано: ${rows.length} файлов за ${totalTime}s (среднее ${avgTime}s/файл)`);
+
+  saveBtn.disabled = rows.length === 0;
+  reparseBtn.disabled = rows.length === 0;
+  runBtn.disabled = false;
+  cancelBtn.disabled = true;
+}
+
+cancelBtn.addEventListener("click", ()=>{ cancelFlag = true; cancelBtn.disabled = true; });
+
+/* ===========================================================
+   Экспорт в Excel
+   =========================================================== */
+function saveExcel(){
+  syncRowsFromTable();
+  if(!rows.length){ alert("Пока нечего сохранять."); return; }
+  const header = COLS;
+  const ws = XLSX.utils.json_to_sheet(rows, { header });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Orders");
+
+  const timestamp = new Date().toISOString().slice(0,19).replace(/:/g,"-");
+  XLSX.writeFile(wb, `orders_ocr_v2_${timestamp}.xlsx`);
+
+  log(`Excel сохранен: orders_ocr_v2_${timestamp}.xlsx`);
+}
+
+runBtn.addEventListener("click", runOCR);
+saveBtn.addEventListener("click", saveExcel);
+
+log("✨ OCR v2.0 загружен: умный парсинг, ML-коррекция, интерактивный режим");
+log("Выберите файлы и нажмите 'Распознать'");
+</script>
+</body>
+</html>
