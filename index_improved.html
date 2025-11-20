@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OCR мини-карточек заказов -> Excel</title>
+  <style>
+    :root { --accent:#2563eb; --border:#e5e7eb; --muted:#6b7280; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color:#111827; }
+    h1 { font-size: 22px; margin: 0 0 12px; }
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; background:#fff; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .spacer { flex:1; }
+    .btn { padding:10px 14px; border:1px solid #374151; background:#fff; border-radius:10px; cursor:pointer; }
+    .btn:disabled { opacity:.5; cursor:default; }
+    .btn.secondary { border-color:var(--border); }
+    .drop { border:2px dashed #9ca3af; border-radius:12px; padding:18px; text-align:center; color:#374151; }
+    .drop.dragover { border-color: var(--accent); background:#eef2ff; color:#1d4ed8; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .status { font-size: 13px; margin-left: 8px; }
+    .progress { height: 8px; background:#f3f4f6; border-radius:6px; overflow:hidden; margin-top:8px; }
+    .bar { height:100%; width:0%; background:var(--accent); transition:width .18s ease; }
+    .grid { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .grid th, .grid td { border:1px solid #f3f4f6; padding:6px 8px; font-size:13px; vertical-align:top; }
+    .grid th { background:#fafafa; text-align:left; position:sticky; top:0; z-index:1; }
+    td[contenteditable="true"] { background:#fff; outline:none; cursor:text; }
+    td[contenteditable="true"]:focus { box-shadow: inset 0 0 0 2px rgba(37,99,235,.2); }
+    .tools { display:flex; gap:8px; align-items:center; }
+    .select { padding:8px 10px; border:1px solid #9ca3af; border-radius:10px; background:#fff; }
+    .small { font-size:12px; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; background:#f9fafb; border:1px solid var(--border); border-radius:8px; padding:8px; max-height:110px; overflow:auto; }
+    .hint { color: #059669; font-weight: 500; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>OCR мини-карточек заказов -> Excel</h1>
+
+  <div class="card">
+    <div class="row">
+      <label class="btn">
+        Выбрать файлы
+        <input id="fileInput" type="file" accept="image/*" multiple style="display:none" />
+      </label>
+      <label class="btn">
+        Выбрать папку
+        <input id="dirInput" type="file" webkitdirectory style="display:none" />
+      </label>
+      <button id="runBtn" class="btn" disabled>Распознать</button>
+      <button id="cancelBtn" class="btn secondary" disabled>Отмена</button>
+      <button id="clearBtn" class="btn secondary">Очистить всё</button>
+      <button id="saveBtn" class="btn" disabled>Скачать Excel</button>
+      <span id="countSpan" class="muted">Файлы не выбраны</span>
+      <span class="spacer"></span>
+      <label class="muted">Параллельность
+        <select id="concurrency" class="select">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="dropZone" class="drop" style="margin-top:12px;">
+      Перетащите сюда изображения или нажмите "Выбрать папку/файлы".
+      <div class="progress"><div id="progBar" class="bar"></div></div>
+      <div id="status" class="status muted"></div>
+    </div>
+    <div class="small muted" style="margin-top:8px;">
+      Работает локально в браузере. На первый запуск нужен интернет для загрузки языка rus.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content: space-between">
+      <div class="muted">Предпросмотр данных и правка <span class="hint">(кликните по ячейке для редактирования)</span>:</div>
+      <div class="tools">
+        <span id="rowCount" class="muted small"></span>
+        <label class="muted">Столбец:
+          <select id="colSelect" class="select">
+            <option>Файл</option>
+            <option selected>ФИО</option>
+            <option>Телефон</option>
+            <option>Адрес</option>
+            <option>Raw OCR</option>
+          </select>
+
+        </label>
+        <button id="clearColBtn" class="btn secondary">Очистить столбец</button>
+        <button id="fillDownBtn" class="btn secondary">Копировать вниз</button>
+      </div>
+    </div>
+    <div style="overflow:auto; max-height: 400px; border:1px solid var(--border); border-radius:8px;">
+      <table id="preview" class="grid">
+        <thead>
+          <tr>
+            <th>Файл</th><th>ФИО</th><th>Телефон</th><th>Адрес</th><th>Raw OCR</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="small muted" style="margin-top:8px;">
+      Подсказка: кликните по ячейке для редактирования. После правок Excel сохранит текущие значения таблицы.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="muted">Логи и диагностика:</div>
+    <div id="log" class="log"></div>
+  </div>
+
+<script>
+/* ===========================================================
+   UI и загрузка файлов
+   =========================================================== */
+const EXT_OK = /\.(jpg|jpeg|png|webp|bmp|gif|tif|tiff|heic)$/i;
+function isImageFile(f){
+  return (f.type && f.type.startsWith("image/")) || EXT_OK.test(f.name);
+}
+
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+function setStatus(msg){ statusEl.textContent = msg || ""; }
+function log(msg){ logEl.textContent += msg + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+function prog(pct){ document.getElementById("progBar").style.width = Math.max(0, Math.min(100, pct)) + "%"; }
+
+const fileInput = document.getElementById("fileInput");
+const dirInput  = document.getElementById("dirInput");
+const runBtn    = document.getElementById("runBtn");
+const cancelBtn = document.getElementById("cancelBtn");
+const clearBtn  = document.getElementById("clearBtn");
+const saveBtn   = document.getElementById("saveBtn");
+const previewBody = document.querySelector("#preview tbody");
+const countSpan = document.getElementById("countSpan");
+const rowCount = document.getElementById("rowCount");
+const colSelect = document.getElementById("colSelect");
+const COLS = ["Файл","ФИО","Телефон","Адрес","Raw OCR"];
+const clearColBtn = document.getElementById("clearColBtn");
+const fillDownBtn = document.getElementById("fillDownBtn");
+const concurrencySel = document.getElementById("concurrency");
+
+// Улучшенные регулярки для города
+const CITY_HINTS = [
+  "ул\\.?", "улица", "просп\\.?", "проспект", "пер\\.?", "переул",
+  "шоссе", "ш\\.", "б-р", "бульвар", "тракт", "мкр\\.?", "квартал",
+  "кв-л", "проезд", "проул", "дом", "д\\.", "кв\\.", "корп\\.", "стр\\."
+];
+const CITY_CUT_RE = new RegExp("(?:^|[\\s,.;:()\\[\\]-])(?:" + CITY_HINTS.join("|") + ")(?:\\s|$|,)", "i");
+
+function cleanCityName(s){
+  if(!s) return "";
+  // убираем префиксы "г.", "город", а заодно рп/пгт/пос./с.
+  let t = s.trim().replace(/^(г\\.?|город|рп\\.?|пгт\\.?|пос\\.?|с\\.)\\s*/i, "");
+  const m = CITY_CUT_RE.exec(t);
+  // более мягкая отсечка - только если нашли чёткий маркер со словом улица/дом/пр
+  if(m && m.index > 0) t = t.slice(0, m.index).trim();
+  t = t.split(/[|]/)[0].trim(); // убираем pipe-разделители
+  // отрезаем запятую и дальше, если что-то ещё осталось
+  const commaIdx = t.indexOf(',');
+  if(commaIdx > 0) t = t.slice(0, commaIdx).trim();
+  return titlecaseRu(t);
+}
+
+let filesList = [];
+let rows = [];
+
+function setFiles(list){
+  const arr = Array.from(list || []);
+  filesList = arr.filter(isImageFile);
+  countSpan.textContent = filesList.length ? `Выбрано файлов: ${filesList.length}` : "Файлы не выбраны";
+  setStatus(filesList.length ? "Готово к распознаванию. Нажмите кнопку 'Распознать'." : "");
+  runBtn.disabled = filesList.length === 0;
+  saveBtn.disabled = true;
+  prog(0);
+  log("Принято файлов: " + filesList.length);
+  // УБРАН автозапуск - пользователь сам нажимает кнопку
+}
+
+fileInput.addEventListener("change", e => setFiles(e.target.files));
+dirInput .addEventListener("change", e => setFiles(e.target.files));
+
+const dropZone = document.getElementById("dropZone");
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("dragover"); setFiles(e.dataTransfer.files); });
+
+clearBtn.addEventListener("click", ()=>{
+  filesList = [];
+  rows = [];
+  previewBody.innerHTML = "";
+  countSpan.textContent = "Файлы не выбраны";
+  rowCount.textContent = "";
+  setStatus("");
+  logEl.textContent = "";
+  prog(0);
+  runBtn.disabled = true;
+  saveBtn.disabled = true;
+  log("Очищено. Загрузите новые файлы.");
+});
+
+/* ===========================================================
+   Предобработка изображения на canvas
+   =========================================================== */
+async function fileToImageBitmap(file){
+  const blobURL = URL.createObjectURL(file);
+  try{
+    const img = await createImageBitmap(await fetch(blobURL).then(r=>r.blob()));
+    URL.revokeObjectURL(blobURL);
+    return img;
+  }catch(e){
+    URL.revokeObjectURL(blobURL);
+    throw e;
+  }
+}
+
+function getExifOrientation(file){
+  return new Promise(resolve=>{
+    const reader = new FileReader();
+    reader.onload = e => {
+      const view = new DataView(e.target.result);
+      if(view.getUint16(0,false)!==0xFFD8) return resolve(1);
+      let offset=2, marker, length;
+      while(offset<view.byteLength){
+        marker = view.getUint16(offset,false); offset+=2;
+        if(marker===0xFFE1){
+          length = view.getUint16(offset,false); offset+=2;
+          if(view.getUint32(offset,false)===0x45786966){
+            offset+=6;
+            const little = view.getUint16(offset,false)===0x4949;
+            offset += view.getUint32(offset+4,little);
+            const tags = view.getUint16(offset,little); offset+=2;
+            for(let i=0;i<tags;i++){
+              if(view.getUint16(offset+i*12,little)===0x0112){
+                return resolve(view.getUint16(offset+i*12+8,little));
+              }
+            }
+          }
+          break;
+        }else if((marker&0xFF00)!==0xFF00) break;
+        else offset += view.getUint16(offset,false);
+      }
+      resolve(1);
+    };
+    reader.readAsArrayBuffer(file.slice(0,65536));
+  });
+}
+
+async function preprocessToBlob(file){
+  const bmp = await fileToImageBitmap(file);
+  const ori = await getExifOrientation(file);
+  let w=bmp.width, h=bmp.height, rot=0, flip=false;
+  if(ori===2){ flip=true; }
+  else if(ori===3){ rot=180; }
+  else if(ori===4){ rot=180; flip=true; }
+  else if(ori===5){ rot=90; flip=true; [w,h]=[h,w]; }
+  else if(ori===6){ rot=90; [w,h]=[h,w]; }
+  else if(ori===7){ rot=270; flip=true; [w,h]=[h,w]; }
+  else if(ori===8){ rot=270; [w,h]=[h,w]; }
+
+  const maxW=1800;
+  if(w>maxW){ h=Math.round(h*maxW/w); w=maxW; }
+
+  const canv=new OffscreenCanvas(w,h), ctx=canv.getContext("2d",{willReadFrequently:true});
+  ctx.translate(w/2,h/2);
+  if(rot) ctx.rotate(rot*Math.PI/180);
+  if(flip) ctx.scale(-1,1);
+  ctx.drawImage(bmp, -bmp.width/2, -bmp.height/2, bmp.width, bmp.height);
+  ctx.setTransform(1,0,0,1,0,0);
+  bmp.close();
+
+  const imgd = ctx.getImageData(0,0,w,h);
+  const data = imgd.data;
+
+  // grayscale
+  for(let i=0;i<data.length;i+=4){
+    const g = Math.round(0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]);
+    data[i]=data[i+1]=data[i+2]=g;
+  }
+
+  // контраст-stretch 2-98 перцентили
+  const hist = new Uint32Array(256);
+  for(let i=0;i<data.length;i+=4) hist[data[i]]++;
+  const total = w*h;
+  let sum=0, p2=0, p98=255;
+  for(let v=0;v<256;v++){
+    sum+=hist[v];
+    if(!p2 && sum>=total*0.02) p2=v;
+    if(sum>=total*0.98){ p98=v; break; }
+  }
+  if(p98<=p2) p98=p2+1;
+  for(let i=0;i<data.length;i+=4){
+    let v = data[i];
+    v = Math.max(0, Math.min(255, Math.round((v-p2)*255/(p98-p2))));
+    data[i]=data[i+1]=data[i+2]=v;
+  }
+
+  // Otsu бинаризация
+  hist.fill(0);
+  for(let i=0;i<data.length;i+=4) hist[data[i]]++;
+  let sumB=0, wB=0, max=0, thresh=128;
+  const sumT = Array.from(hist).reduce((a,v,i)=>a+i*v,0);
+  for(let t=0;t<256;t++){
+    wB+=hist[t]; if(wB===0) continue;
+    const wF=total-wB; if(wF===0) break;
+    sumB+=t*hist[t];
+    const mB=sumB/wB, mF=(sumT-sumB)/wF;
+    const between=wB*wF*(mB-mF)*(mB-mF);
+    if(between>max){ max=between; thresh=t; }
+  }
+  for(let i=0;i<data.length;i+=4){
+    const bin = data[i]>thresh?255:0;
+    data[i]=data[i+1]=data[i+2]=bin;
+  }
+
+  // морфология: dilate+erode (3x3)
+  function morph(op){
+    const tmp=new Uint8ClampedArray(data.length);
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        const idx=(y*w+x)*4;
+        let val = data[idx];
+        for(let dy=-1;dy<=1;dy++){
+          for(let dx=-1;dx<=1;dx++){
+            const ny=y+dy, nx=x+dx;
+            if(ny<0||ny>=h||nx<0||nx>=w) continue;
+            const nidx=(ny*w+nx)*4;
+            if(op==='dilate') val=Math.max(val, data[nidx]);
+            else val=Math.min(val, data[nidx]);
+          }
+        }
+        tmp[idx]=tmp[idx+1]=tmp[idx+2]=val;
+      }
+    }
+    data.set(tmp);
+  }
+  morph('dilate');
+  morph('erode');
+
+  ctx.putImageData(imgd,0,0);
+  return await canv.convertToBlob({type:"image/png"});
+}
+
+/* ===========================================================
+   Парсинг данных из OCR-текста
+   =========================================================== */
+function fixCyrConfusions(s){
+  if(!s) return "";
+  // Шщ → Щ в начале слов
+  s = s.replace(/\bШщ/g,"Щ");
+  // латинские lookalikes → кириллица
+  const map={"A":"А","B":"В","C":"С","E":"Е","H":"Н","K":"К","M":"М","O":"О","P":"Р","T":"Т","X":"Х","a":"а","c":"с","e":"е","o":"о","p":"р","x":"х"};
+  return s.replace(/[ABCEHKMOPTXaceopx]/g, m=>map[m]||m);
+}
+
+function titlecaseRu(s){
+  if(!s) return "";
+  return s.split(/\s+/).map(w=>{
+    if(w.length<2) return w;
+    // пропускаем римские цифры, аббревиатуры
+    if(/^[IVX]+$/i.test(w) || /^[А-ЯЁ]{2,}$/.test(w)) return w;
+    return w[0].toUpperCase() + w.slice(1).toLowerCase();
+  }).join(" ");
+}
+
+function normalizePhone(ph){
+  if(!ph) return "";
+  ph = ph.replace(/[^\d+]/g,"");
+  if(ph.startsWith("8") && ph.length===11) ph = "+7"+ph.slice(1);
+  if(ph.startsWith("7") && ph.length===11) ph = "+"+ph;
+  if(!ph.startsWith("+")) ph = "+"+ph;
+  // формат +7 XXX XXX-XX-XX
+  if(ph.startsWith("+7") && ph.length===12){
+    return `+7 ${ph.slice(2,5)} ${ph.slice(5,8)}-${ph.slice(8,10)}-${ph.slice(10,12)}`;
+  }
+  return ph;
+}
+
+function parsePhones(txt){
+  if(!txt) return "";
+  const lines = txt.split(/[\n\r]+/);
+  const found = new Set();
+  const re = /(?:\+?7|8)[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d/g;
+  for(const ln of lines){
+    if(/факс|тел\.|phone/i.test(ln)) continue;
+    let m; while(m=re.exec(ln)){
+      const norm = normalizePhone(m[0]);
+      if(norm.length>=12) found.add(norm);
+    }
+  }
+  return Array.from(found).slice(0,2).join(", ");
+}
+
+function parseFio(txt){
+  if(!txt) return "";
+  txt = fixCyrConfusions(txt);
+  // ищем строку с "ФИО" или паттерн "Фамилия Имя Отчество"
+  const lines = txt.split(/[\n\r]+/).map(s=>s.trim()).filter(Boolean);
+  for(const ln of lines){
+    if(/ФИО|получател|клиент/i.test(ln)){
+      let fio = ln.replace(/ФИО[:\s]*/i,"").replace(/получател[ья]?[:\s]*/i,"").replace(/клиент[:\s]*/i,"").trim();
+      fio = fio.split(/[,;|]/)[0].trim();
+      // убираем номера, даты, лишние символы
+      fio = fio.replace(/\d{2}[./-]\d{2}[./-]\d{2,4}/g,"").replace(/[№#]\s*\d+/g,"").trim();
+      if(/^[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+/.test(fio)){
+        return titlecaseRu(fio);
+      }
+    }
+  }
+  // fallback: ищем строку из 2-3 слов с заглавными буквами
+  for(const ln of lines){
+    if(/телефон|адрес|город|улица|дом|кв\.|получател/i.test(ln)) continue;
+    const words = ln.split(/\s+/).filter(w=>w.length>1 && /^[А-ЯЁ]/.test(w));
+    if(words.length>=2 && words.length<=4){
+      return titlecaseRu(words.join(" "));
+    }
+  }
+  return "";
+}
+
+// УЛУЧШЕННЫЙ парсер адресов - не захватывает телефоны и ФИО
+function parseFullAddress(txt){
+  if(!txt) return "";
+  txt = fixCyrConfusions(txt);
+  const lines = txt.split(/[\n\r]+/).map(s=>s.trim()).filter(Boolean);
+  
+  // Извлекаем все телефоны, чтобы исключить их из адреса
+  const phonePattern = /(?:\+?7|8)[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d[\s()-]*\d/g;
+  const phonesFound = new Set();
+  for(const ln of lines){
+    let m; while(m=phonePattern.exec(ln)) phonesFound.add(m[0]);
+  }
+  
+  let city="", street="";
+  
+  // Ищем город
+  for(const ln of lines){
+    if(/город|^г\.|населённый пункт/i.test(ln)){
+      let c = ln.replace(/город[:\s]*/i,"").replace(/^г\.\s*/i,"").replace(/населённый пункт[:\s]*/i,"").trim();
+      c = c.split(/[,;|]/)[0].trim();
+      // Убираем телефоны из строки города
+      for(const ph of phonesFound) c = c.replace(ph,"");
+      c = c.trim();
+      if(c.length>2 && !/телефон|адрес|улица|дом/i.test(c)){
+        city = cleanCityName(c);
+        break;
+      }
+    }
+  }
+  
+  // Ищем улицу/адрес
+  for(const ln of lines){
+    if(/адрес|улица|ул\.|проспект|просп\.|переулок|пер\.|дом|д\.|квартира|кв\./i.test(ln)){
+      let s = ln.replace(/адрес[:\s]*/i,"").trim();
+      // Убираем телефоны
+      for(const ph of phonesFound) s = s.replace(ph,"");
+      s = s.trim();
+      // Убираем префикс города если он уже в начале строки
+      if(city) s = s.replace(new RegExp("^"+city.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')+"[,\\s]*","i"),"");
+      s = s.split(/[|]/)[0].trim();
+      if(s.length>3){
+        street = titlecaseRu(s);
+        break;
+      }
+    }
+  }
+  
+  // Если город не найден - попытка извлечь из первой строки без телефонов
+  if(!city){
+    for(const ln of lines){
+      let hasPhone = false;
+      for(const ph of phonesFound) if(ln.includes(ph)){ hasPhone=true; break; }
+      if(hasPhone) continue;
+      if(!/ФИО|получател|клиент/i.test(ln) && ln.length>2){
+        city = cleanCityName(ln);
+        if(city.length>2) break;
+      }
+    }
+  }
+  
+  if(city && street) return `${city}, ${street}`;
+  if(city) return city;
+  if(street) return street;
+  return "";
+}
+
+function parseOrder(rawText, filename){
+  const fio = parseFio(rawText);
+  const phone = parsePhones(rawText);
+  const addr = parseFullAddress(rawText);
+  return {
+    "Файл": filename,
+    "ФИО": fio,
+    "Телефон": phone,
+    "Адрес": addr,
+    "Raw OCR": rawText.slice(0,300)
+  };
+}
+
+/* Мини-тесты на регулярки */
+(function regexSelfTests(){
+  try{
+    console.assert(normalizePhone("+7 (961) 689-96-08")==="+7 961 689-96-08", "normalizePhone fail");
+    console.assert(parsePhones("моб. 8 (951) 270 42 79, доп. +7 951 270-42-79")==="+7 951 270-42-79", "parsePhones dedup fail");
+    console.assert(fixCyrConfusions("Шщитова")==="Щитова", "fixCyrConfusions Шщитова→Щитова");
+    console.assert(parseFio("ФИО Шщитова Альбина Ивановна")==="Щитова Альбина Ивановна", "parseFio Щщитова");
+  }catch(e){ /* не мешаем UI */ }
+})();
+
+/* ===========================================================
+   Таблица: предпросмотр, редактирование, массовые операции
+   =========================================================== */
+function appendPreviewRow(r){
+  const tr=document.createElement("tr");
+  COLS.forEach((k,idx)=>{
+    const td=document.createElement("td");
+    td.textContent = r[k] ?? "";
+    if(idx!==0){ 
+      td.setAttribute("contenteditable","true");
+      // Одним кликом активируется редактирование
+      td.addEventListener("click", ()=> td.focus());
+    }
+    tr.appendChild(td);
+  });
+  previewBody.appendChild(tr);
+}
+
+function syncRowsFromTable(){
+  rows = Array.from(previewBody.querySelectorAll("tr")).map(tr=>{
+    const tds = tr.querySelectorAll("td");
+    const obj = {};
+    COLS.forEach((k,i)=> obj[k] = (tds[i]?.textContent || "").trim());
+    return obj;
+  });
+  updateRowCount();
+}
+
+function updateRowCount(){
+  const shown = previewBody.querySelectorAll("tr").length;
+  const total = rows.length;
+  if(total > 0){
+    rowCount.textContent = shown === total ? `Строк: ${total}` : `Показано: ${shown} из ${total}`;
+  } else {
+    rowCount.textContent = "";
+  }
+}
+
+clearColBtn.addEventListener("click", ()=>{
+  const idx = colSelect.selectedIndex;
+  if(idx===0){ alert("Столбец Файл очищать нельзя."); return; }
+  for(const tr of previewBody.querySelectorAll("tr")){
+    const td = tr.children[idx];
+    td.textContent = "";
+  }
+  syncRowsFromTable();
+});
+
+fillDownBtn.addEventListener("click", ()=>{
+  const idx = colSelect.selectedIndex;
+  if(idx===0){ alert("Столбец Файл копировать вниз не имеет смысла."); return; }
+  const trs = Array.from(previewBody.querySelectorAll("tr"));
+  if(trs.length<2) return;
+  const base = trs[0].children[idx].textContent;
+  const val = base || prompt("Введите значение, которое скопировать вниз:", "");
+  if(val===null) return;
+  for(let i=1;i<trs.length;i++){
+    trs[i].children[idx].textContent = val;
+  }
+  syncRowsFromTable();
+});
+
+// Слежение за ручной правкой
+previewBody.addEventListener("input", ()=> syncRowsFromTable());
+
+/* ===========================================================
+   Очередь OCR с лимитом параллельности и отменой
+   =========================================================== */
+let cancelFlag = false;
+
+async function createWorkerSafe(){
+  setStatus("Загружаю языки OCR...");
+  log("Загрузка языков rus+eng...");
+  const worker = await Tesseract.createWorker("rus+eng", 1, {
+    langPath: "https://tessdata.projectnaptha.com/4.0.0"
+  });
+  return worker;
+}
+
+async function recognizeWithFallback(worker, blob){
+  // базовое распознавание
+  const base = await worker.recognize(blob, { tessedit_pageseg_mode:"6" });
+  let text = base?.data?.text || "";
+
+  // если телефонов не нашли - второй проход с whitelist
+  if(!parsePhones(text)){
+    try{
+      const cfg = { tessedit_pageseg_mode:"6", tessedit_char_whitelist:"+() -0123456789" };
+      const phonePass = await worker.recognize(blob, cfg);
+      const p = parsePhones(phonePass?.data?.text || "");
+      if(p) text = (text + "\n" + p).trim();
+    }catch(e){ /* не критично */ }
+  }
+  return text;
+}
+
+async function runOCR(){
+  if(typeof Tesseract === "undefined" || !Tesseract.createWorker){
+    alert("Не удалось загрузить движок распознавания. Проверьте интернет на первый запуск.");
+    return;
+  }
+  if(!filesList.length){ alert("Добавьте изображения."); return; }
+
+  runBtn.disabled = true; saveBtn.disabled = true; cancelBtn.disabled = false;
+  rows = []; previewBody.innerHTML = ""; prog(1); setStatus("Подготовка..."); logEl.textContent = "";
+  updateRowCount();
+
+  cancelFlag = false;
+  let processed = 0;
+  const total = filesList.length;
+  const conc = parseInt(concurrencySel.value,10) || 2;
+
+  // Пакетная обработка - создаем по воркеру на поток
+  const workers = [];
+  try{
+    for(let i=0;i<conc;i++){ workers.push(await createWorkerSafe()); }
+  }catch(e){
+    alert("Языковые данные не загрузились. Нужен доступ к tessdata.projectnaptha.com или VPN.");
+    setStatus("Ошибка загрузки языков"); runBtn.disabled=false; cancelBtn.disabled=true; return;
+  }
+
+  // очередь
+  const tasks = filesList.map((file, idx)=>({file, idx}));
+  const results = new Array(tasks.length);
+
+  async function processTask(worker, task){
+    if(cancelFlag) return;
+    const {file, idx} = task;
+    try{
+      setStatus(`Предобработка: ${idx+1} из ${total}`);
+      const blob = await preprocessToBlob(file);
+      setStatus(`Распознаю ${idx+1} из ${total}`);
+      const txt = await recognizeWithFallback(worker, blob);
+      const row = parseOrder(txt, file.name);
+      results[idx] = row;
+      // Добавляем ВСЕ строки в preview (убран лимит 40)
+      appendPreviewRow(row);
+    }catch(err){
+      results[idx] = {"Файл": file.name, "ФИО":"", "Телефон":"", "Адрес":"", "Raw OCR":"Ошибка OCR: " + (err.message || err)};
+      log(`Ошибка файла ${file.name}: ${err.message || err}`);
+      appendPreviewRow(results[idx]);
+    }finally{
+      processed++;
+      prog(Math.round((processed/total)*100));
+      setStatus(`Готово: ${processed} из ${total}`);
+    }
+  }
+
+  // диспетчер с ограничением параллельности
+  let cursor = 0;
+  async function workerLoop(worker){
+    while(!cancelFlag && cursor < tasks.length){
+      const myTask = tasks[cursor++]; await processTask(worker, myTask);
+    }
+  }
+
+  await Promise.all(workers.map(w => workerLoop(w))).catch(()=>{});
+  for(const w of workers){ try{ await w.terminate(); }catch(e){} }
+
+  // СОХРАНЯЕМ частичные результаты при отмене
+  rows = results.filter(Boolean);
+  syncRowsFromTable();
+
+  if(cancelFlag){
+    setStatus(`Остановлено. Обработано: ${rows.length} из ${total}`);
+    log(`Обработка остановлена. Сохранено строк: ${rows.length}`);
+    saveBtn.disabled = rows.length === 0;
+    runBtn.disabled = false; cancelBtn.disabled = true;
+    return;
+  }
+
+  setStatus("Готово"); log(`Итого строк: ${rows.length}`);
+  saveBtn.disabled = rows.length === 0;
+  runBtn.disabled = false; cancelBtn.disabled = true;
+}
+
+cancelBtn.addEventListener("click", ()=>{ cancelFlag = true; cancelBtn.disabled = true; });
+
+/* ===========================================================
+   Экспорт в Excel
+   =========================================================== */
+function saveExcel(){
+  syncRowsFromTable();
+  if(!rows.length){ alert("Пока нечего сохранять."); return; }
+  const header = COLS;
+  const ws = XLSX.utils.json_to_sheet(rows, { header });
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Orders");
+  XLSX.writeFile(wb, "orders_ocr.xlsx");
+}
+runBtn.addEventListener("click", runOCR);
+saveBtn.addEventListener("click", saveExcel);
+</script>
+</body>
+</html>
