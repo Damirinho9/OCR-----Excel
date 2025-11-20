@@ -1,0 +1,1202 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OCR мини-карточек заказов -> Excel v4.0 Enterprise</title>
+  <style>
+    :root { --accent:#2563eb; --border:#e5e7eb; --muted:#6b7280; --success:#16a34a; --warning:#f59e0b; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color:#111827; background:#f9fafb; }
+    h1 { font-size: 22px; margin: 0 0 12px; }
+    .version { color: var(--accent); font-size: 12px; font-weight: 600; background:#dbeafe; padding:2px 8px; border-radius:12px; }
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; background:#fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .spacer { flex:1; }
+    .btn { padding:10px 14px; border:1px solid #374151; background:#fff; border-radius:10px; cursor:pointer; font-size:14px; transition: all 0.2s; }
+    .btn:hover:not(:disabled) { background:#f3f4f6; transform: translateY(-1px); }
+    .btn:disabled { opacity:.5; cursor:default; }
+    .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .btn.success { background:var(--success); color:#fff; border-color:var(--success); }
+    .btn.secondary { border-color:var(--border); }
+    .drop { border:2px dashed #9ca3af; border-radius:12px; padding:18px; text-align:center; color:#374151; }
+    .drop.dragover { border-color: var(--accent); background:#eef2ff; color:#1d4ed8; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .status { font-size: 13px; margin-left: 8px; }
+    .progress { height: 8px; background:#f3f4f6; border-radius:6px; overflow:hidden; margin-top:8px; }
+    .bar { height:100%; width:0%; background:var(--accent); transition:width .18s ease; }
+    .progress-label { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+    .container { display: flex; gap: 16px; }
+    .main-panel { flex: 1; min-width: 0; }
+    .side-panel { width: 360px; border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: #fafafa; position: sticky; top: 24px; height: fit-content; max-height: calc(100vh - 48px); overflow: auto; }
+    .side-panel.hidden { display: none; }
+
+    .virtual-container { overflow: auto; max-height: 420px; border:1px solid var(--border); border-radius:8px; position: relative; }
+    .virtual-spacer { height: 0; }
+    .virtual-content { position: relative; }
+
+    .grid { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .grid th, .grid td { border:1px solid #f3f4f6; padding:6px 8px; font-size:12px; vertical-align:top; word-wrap: break-word; }
+    .grid th { background:#fafafa; text-align:left; position:sticky; top:0; z-index:2; font-weight:600; }
+    .grid tr:hover { background: #f9fafb; cursor: pointer; }
+    .grid tr.selected { background: #dbeafe; }
+    .grid tr.priority { border-left: 3px solid var(--accent); }
+    .grid tr.duplicate { background: #fef3c7; }
+    td[contenteditable="true"] { background:#fff; outline:none; }
+    td[contenteditable="true"]:focus { box-shadow: inset 0 0 0 2px rgba(37,99,235,.2); }
+
+    .tabs { display:flex; gap:4px; border-bottom:2px solid var(--border); margin-bottom:12px; }
+    .tab { padding:8px 16px; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-2px; font-weight:500; color:var(--muted); }
+    .tab.active { border-bottom-color:var(--accent); color:var(--accent); }
+    .tab:hover { background:#f3f4f6; }
+
+    .tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .select { padding:8px 10px; border:1px solid #9ca3af; border-radius:10px; background:#fff; font-size:13px; }
+    .input { padding:8px 10px; border:1px solid #9ca3af; border-radius:10px; background:#fff; font-size:13px; }
+    .small { font-size:12px; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; background:#f9fafb; border:1px solid var(--border); border-radius:8px; padding:8px; max-height:110px; overflow:auto; font-size: 11px; }
+
+    .preview-img { max-width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+    .preview-title { font-weight: 600; margin-bottom: 8px; color: #111827; font-size:16px; }
+    .preview-data { font-size: 12px; margin-top: 12px; }
+    .preview-data dt { font-weight: 600; margin-top: 8px; color: #6b7280; }
+    .preview-data dd { margin: 4px 0 0 0; color: #111827; word-break: break-word; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 4px; }
+    .badge.corrected { background: #dcfce7; color: #166534; }
+    .badge.warning { background: #fef3c7; color: #92400e; }
+    .badge.cached { background: #e0e7ff; color: #3730a3; }
+    .badge.duplicate { background: #fed7aa; color: #9a3412; }
+
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
+    .stat-card { background:#f9fafb; border:1px solid var(--border); border-radius:8px; padding:12px; }
+    .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; font-weight: 600; }
+    .stat-value { font-size: 20px; font-weight: 700; color: #111827; margin-top: 4px; }
+
+    .modal { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center; }
+    .modal.active { display:flex; }
+    .modal-content { background:#fff; border-radius:12px; max-width:600px; width:90%; max-height:80vh; overflow:auto; padding:24px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1); }
+    .modal-header { font-size:18px; font-weight:600; margin-bottom:16px; }
+    .modal-body { margin-bottom:16px; }
+    .modal-footer { display:flex; gap:8px; justify-content:flex-end; }
+
+    .form-group { margin-bottom: 16px; }
+    .form-label { display:block; font-weight:600; margin-bottom:4px; font-size:13px; }
+    .form-control { width:100%; padding:8px 12px; border:1px solid #9ca3af; border-radius:8px; font-size:14px; }
+    .form-control:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(37,99,235,0.1); }
+    textarea.form-control { min-height:100px; font-family:monospace; resize:vertical; }
+
+    .template-list { display:flex; flex-direction:column; gap:8px; }
+    .template-item { display:flex; align-items:center; gap:8px; padding:8px; border:1px solid var(--border); border-radius:8px; background:#f9fafb; }
+    .template-item.active { border-color:var(--accent); background:#dbeafe; }
+    .template-name { flex:1; font-weight:500; }
+
+    .analytics-grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    .analytics-section { background:#f9fafb; padding:12px; border-radius:8px; border:1px solid var(--border); }
+    .analytics-title { font-weight:600; margin-bottom:8px; font-size:14px; }
+    .analytics-list { font-size:12px; }
+    .analytics-list-item { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border); }
+
+    .history-item { padding:12px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px; cursor:pointer; background:#fff; }
+    .history-item:hover { background:#f9fafb; border-color:var(--accent); }
+    .history-title { font-weight:600; font-size:14px; }
+    .history-meta { font-size:11px; color:var(--muted); margin-top:4px; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>OCR мини-карточек заказов -> Excel <span class="version">v4.0 Enterprise</span></h1>
+
+  <div class="card">
+    <div class="row">
+      <label class="btn">
+        📁 Файлы
+        <input id="fileInput" type="file" accept="image/*" multiple style="display:none" />
+      </label>
+      <label class="btn">
+        📂 Папка
+        <input id="dirInput" type="file" webkitdirectory style="display:none" />
+      </label>
+      <button id="runBtn" class="btn primary" disabled>🚀 Распознать</button>
+      <button id="reparseBtn" class="btn secondary" disabled>🔄 Перепарсить</button>
+      <button id="cancelBtn" class="btn secondary" disabled>⏹ Отмена</button>
+      <button id="dedupeBtn" class="btn secondary" disabled>🔗 Дедупликация</button>
+      <button id="saveBtn" class="btn success" disabled>💾 Excel</button>
+      <button id="exportMenuBtn" class="btn secondary" disabled>📤 Экспорт ▾</button>
+      <span class="spacer"></span>
+      <button id="templatesBtn" class="btn secondary">📋 Шаблоны</button>
+      <button id="historyBtn" class="btn secondary">📜 История</button>
+      <button id="analyticsBtn" class="btn secondary" disabled>📊 Аналитика</button>
+    </div>
+
+    <div id="exportMenu" class="tools" style="display:none; margin-top:12px; padding:12px; background:#f9fafb; border-radius:8px;">
+      <button id="exportCsvBtn" class="btn secondary">📄 CSV</button>
+      <button id="exportJsonBtn" class="btn secondary">📋 JSON</button>
+      <label class="muted">Кодировка:
+        <select id="csvEncoding" class="select">
+          <option value="utf-8">UTF-8</option>
+          <option value="windows-1251">Windows-1251</option>
+        </select>
+      </label>
+      <label class="muted">Разделитель:
+        <select id="csvDelimiter" class="select">
+          <option value=",">Запятая (,)</option>
+          <option value=";">Точка с запятой (;)</option>
+          <option value="\t">Табуляция</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="dropZone" class="drop" style="margin-top:12px;">
+      Перетащите изображения или выберите файлы/папку, затем нажмите "Распознать"
+      <div class="progress"><div id="progBar" class="bar"></div></div>
+      <div class="progress-label" id="progressLabel"></div>
+      <div id="status" class="status muted"></div>
+    </div>
+
+    <div class="stats" id="statsGrid">
+      <div class="stat-card"><div class="stat-label">Загружено</div><div class="stat-value" id="statFiles">0</div></div>
+      <div class="stat-card"><div class="stat-label">Обработано</div><div class="stat-value" id="statProcessed">0</div></div>
+      <div class="stat-card"><div class="stat-label">Скорость</div><div class="stat-value" id="statSpeed">0 ф/м</div></div>
+      <div class="stat-card"><div class="stat-label">Память</div><div class="stat-value" id="statMemory">0 МБ</div></div>
+      <div class="stat-card"><div class="stat-label">Дубликаты</div><div class="stat-value" id="statDupes">0</div></div>
+    </div>
+
+    <div class="small muted" style="margin-top:12px;">
+      🏢 v4.0 Enterprise: шаблоны парсинга, дедупликация, аналитика, экспорт CSV/JSON, история сессий
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="main-panel">
+      <div class="card">
+        <div class="row" style="justify-content: space-between">
+          <div class="muted">Данные (<span id="rowCount">0</span> строк, <span id="dupeCount">0</span> дубликатов):</div>
+          <div class="tools">
+            <label class="muted">Столбец:
+              <select id="colSelect" class="select">
+                <option>Файл</option><option selected>ФИО</option><option>Телефон</option>
+                <option>Регион</option><option>Город</option><option>Улица</option><option>Дом/Кв</option>
+                <option>Адрес (полный)</option><option>Raw OCR</option>
+              </select>
+            </label>
+            <button id="clearColBtn" class="btn secondary">Очистить</button>
+            <button id="fillDownBtn" class="btn secondary">Копировать вниз</button>
+          </div>
+        </div>
+        <div id="virtualContainer" class="virtual-container">
+          <div id="virtualSpacer" class="virtual-spacer"></div>
+          <div id="virtualContent" class="virtual-content">
+            <table id="preview" class="grid">
+              <thead><tr>
+                <th style="width:120px">Файл</th><th style="width:160px">ФИО</th><th style="width:130px">Телефон</th>
+                <th style="width:110px">Регион</th><th style="width:100px">Город</th><th style="width:150px">Улица</th>
+                <th style="width:90px">Дом/Кв</th><th style="width:200px">Адрес (полный)</th><th style="width:200px">Raw OCR</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="muted">Логи:</div>
+        <div id="log" class="log"></div>
+      </div>
+    </div>
+
+    <div id="sidePanel" class="side-panel hidden">
+      <div class="tabs">
+        <div class="tab active" data-tab="preview">Превью</div>
+        <div class="tab" data-tab="analytics">Аналитика</div>
+      </div>
+      <div id="previewTab" class="tab-content">
+        <div class="preview-title">Просмотр карточки</div>
+        <img id="previewImg" class="preview-img" alt="Preview" />
+        <dl class="preview-data" id="previewData"></dl>
+      </div>
+      <div id="analyticsTab" class="tab-content" style="display:none;">
+        <div class="preview-title">Аналитика</div>
+        <div id="analyticsContent"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальные окна -->
+  <div id="templatesModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">📋 Шаблоны парсинга</div>
+      <div class="modal-body">
+        <div class="template-list" id="templateList"></div>
+        <div style="margin-top:16px;">
+          <button id="addTemplateBtn" class="btn primary">➕ Создать шаблон</button>
+          <button id="importTemplateBtn" class="btn secondary">📥 Импорт</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="closeTemplatesBtn" class="btn secondary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="templateEditorModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">✏️ Редактор шаблона</div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Название шаблона</label>
+          <input type="text" id="templateName" class="form-control" placeholder="Wildberries, Ozon, и т.д." />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Описание</label>
+          <input type="text" id="templateDesc" class="form-control" placeholder="Краткое описание" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">JSON конфигурация</label>
+          <textarea id="templateJson" class="form-control" placeholder='{"fio": {"lineIndex": 0}, "phone": {"lineIndex": 2}}'></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="saveTemplateBtn" class="btn primary">💾 Сохранить</button>
+        <button id="cancelTemplateBtn" class="btn secondary">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="historyModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">📜 История сессий</div>
+      <div class="modal-body">
+        <div id="historyList"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="exportSessionBtn" class="btn secondary">📤 Экспорт текущей</button>
+        <button id="importSessionBtn" class="btn secondary">📥 Импорт</button>
+        <button id="closeHistoryBtn" class="btn secondary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="analyticsModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">📊 Детальная аналитика</div>
+      <div class="modal-body" id="analyticsModalContent"></div>
+      <div class="modal-footer">
+        <button id="closeAnalyticsBtn" class="btn secondary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* =========================================================== CORE =========================================================== */
+const COLS = ["Файл","ФИО","Телефон","Регион","Город","Улица","Дом/Кв","Адрес (полный)","Raw OCR"];
+let filesList = [], rows = [], processedBlobs = new Map(), cancelFlag = false, currentTemplate = null;
+
+/* =========================================================== INDEXEDDB =========================================================== */
+class DB {
+  constructor(name, stores) { this.name = name; this.stores = stores; this.db = null; }
+  async init() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(this.name, 2);
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => { this.db = req.result; resolve(); };
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        this.stores.forEach(store => {
+          if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, {keyPath: 'id', autoIncrement: true});
+        });
+      };
+    });
+  }
+  async get(store, id) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(store, 'readonly');
+      const req = tx.objectStore(store).get(id);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async getAll(store) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(store, 'readonly');
+      const req = tx.objectStore(store).getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async add(store, data) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(store, 'readwrite');
+      const req = tx.objectStore(store).add(data);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async put(store, data) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(store, 'readwrite');
+      const req = tx.objectStore(store).put(data);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async delete(store, id) {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(store, 'readwrite');
+      const req = tx.objectStore(store).delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+}
+
+const db = new DB('OCR_Enterprise_v4', ['templates', 'sessions', 'tessdata']);
+
+/* =========================================================== СЛОВАРИ (v2.0) =========================================================== */
+const SURNAMES=new Set(["Иванов","Смирнов","Кузнецов","Попов","Васильев","Петров","Соколов","Михайлов","Новиков","Фёдоров","Морозов","Волков","Алексеев","Лебедев","Семёнов","Егоров","Павлов","Козлов","Степанов","Николаев","Орлов","Андреев","Макаров","Никитин","Захаров","Зайцев"]);
+const NAMES=new Set(["Александр","Алексей","Андрей","Антон","Артём","Борис","Вадим","Владимир","Дмитрий","Евгений","Егор","Иван","Игорь","Илья","Кирилл","Максим","Михаил","Никита","Олег","Павел","Роман","Сергей","Александра","Анастасия","Анна","Валерия","Виктория","Дарья","Екатерина","Елена","Ирина","Ксения","Мария","Наталья","Ольга","Полина","Светлана","Татьяна"]);
+const STREETS=new Set(["Ленина","Советская","Центральная","Школьная","Молодёжная","Садовая","Набережная","Мира","Комсомольская","Октябрьская","Победы","Строителей","Кирова","Гагарина","Солнечная","Парковая","Пушкина","Московская","Горького"]);
+
+function levenshtein(a,b){const m=[];for(let i=0;i<=b.length;i++)m[i]=[i];for(let j=0;j<=a.length;j++)m[0][j]=j;for(let i=1;i<=b.length;i++){for(let j=1;j<=a.length;j++){m[i][j]=b.charAt(i-1)===a.charAt(j-1)?m[i-1][j-1]:Math.min(m[i-1][j-1]+1,m[i][j-1]+1,m[i-1][j]+1);}}return m[b.length][a.length];}
+function findClosest(word,dict,maxDist=2){if(!word||word.length<3)return null;const lower=word.toLowerCase();for(const e of dict)if(e.toLowerCase()===lower)return null;let best=null,bestD=maxDist+1;for(const e of dict){const d=levenshtein(lower,e.toLowerCase());if(d>0&&d<bestD){bestD=d;best=e;}}return bestD<=maxDist?best:null;}
+function correctWord(word,type="surname"){const dict=type==="surname"?SURNAMES:type==="name"?NAMES:STREETS;return findClosest(word,dict)||word;}
+
+/* =========================================================== UI =========================================================== */
+const els = {
+  fileInput: document.getElementById("fileInput"),
+  dirInput: document.getElementById("dirInput"),
+  runBtn: document.getElementById("runBtn"),
+  reparseBtn: document.getElementById("reparseBtn"),
+  cancelBtn: document.getElementById("cancelBtn"),
+  dedupeBtn: document.getElementById("dedupeBtn"),
+  saveBtn: document.getElementById("saveBtn"),
+  exportMenuBtn: document.getElementById("exportMenuBtn"),
+  exportMenu: document.getElementById("exportMenu"),
+  templatesBtn: document.getElementById("templatesBtn"),
+  historyBtn: document.getElementById("historyBtn"),
+  analyticsBtn: document.getElementById("analyticsBtn"),
+  previewBody: document.querySelector("#preview tbody"),
+  virtualContainer: document.getElementById("virtualContainer"),
+  virtualSpacer: document.getElementById("virtualSpacer"),
+  sidePanel: document.getElementById("sidePanel"),
+  log: document.getElementById("log"),
+  status: document.getElementById("status"),
+  progressLabel: document.getElementById("progressLabel"),
+  progBar: document.getElementById("progBar"),
+  rowCount: document.getElementById("rowCount"),
+  dupeCount: document.getElementById("dupeCount"),
+  statFiles: document.getElementById("statFiles"),
+  statProcessed: document.getElementById("statProcessed"),
+  statSpeed: document.getElementById("statSpeed"),
+  statMemory: document.getElementById("statMemory"),
+  statDupes: document.getElementById("statDupes"),
+  previewImg: document.getElementById("previewImg"),
+  previewData: document.getElementById("previewData")
+};
+
+function log(msg){const t=new Date().toLocaleTimeString();els.log.textContent+=`[${t}] ${msg}\n`;els.log.scrollTop=els.log.scrollHeight;}
+function setStatus(msg){els.status.textContent=msg||"";}
+function setProgressLabel(msg){els.progressLabel.textContent=msg||"";}
+function prog(pct){els.progBar.style.width=Math.max(0,Math.min(100,pct))+"%";}
+
+function updateStats(){
+  els.statFiles.textContent=filesList.length;
+  els.statProcessed.textContent=rows.length;
+  els.rowCount.textContent=rows.length;
+  const dupes=rows.filter(r=>r._duplicate).length;
+  els.statDupes.textContent=dupes;
+  els.dupeCount.textContent=dupes;
+  if(performance.memory){
+    const used=(performance.memory.usedJSHeapSize/1048576).toFixed(1);
+    els.statMemory.textContent=`${used} МБ`;
+  }
+}
+
+els.exportMenuBtn.addEventListener("click",()=>{els.exportMenu.style.display=els.exportMenu.style.display==="none"?"flex":"none";});
+
+/* =========================================================== TABS =========================================================== */
+document.querySelectorAll('.tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    const tabName=tab.dataset.tab;
+    document.getElementById('previewTab').style.display=tabName==='preview'?'block':'none';
+    document.getElementById('analyticsTab').style.display=tabName==='analytics'?'block':'none';
+  });
+});
+
+/* =========================================================== ВИРТУАЛЬНЫЙ СКРОЛЛ =========================================================== */
+const ROW_HEIGHT=32,BUFFER_SIZE=10;
+let visibleStart=0,visibleEnd=0;
+
+function renderVirtualTable(){
+  const h=els.virtualContainer.clientHeight||420;
+  const total=rows.length*ROW_HEIGHT;
+  els.virtualSpacer.style.height=`${total}px`;
+  const st=els.virtualContainer.scrollTop;
+  visibleStart=Math.max(0,Math.floor(st/ROW_HEIGHT)-BUFFER_SIZE);
+  visibleEnd=Math.min(rows.length,Math.ceil((st+h)/ROW_HEIGHT)+BUFFER_SIZE);
+  els.previewBody.innerHTML="";
+
+  for(let i=visibleStart;i<visibleEnd;i++){
+    const row=rows[i];
+    if(!row)continue;
+    const tr=document.createElement("tr");
+    tr.style.position="absolute";
+    tr.style.top=`${i*ROW_HEIGHT}px`;
+    tr.style.width="100%";
+    tr.dataset.index=i;
+    if(i<5)tr.classList.add("priority");
+    if(row._duplicate)tr.classList.add("duplicate");
+
+    COLS.forEach((k,idx)=>{
+      const td=document.createElement("td");
+      td.textContent=row[k]??"";
+      if(idx!==0)td.setAttribute("contenteditable","true");
+      td.addEventListener("dblclick",()=>td.focus());
+      tr.appendChild(td);
+    });
+
+    tr.addEventListener("click",(e)=>{
+      if(e.target.tagName!=="TD"||!e.target.hasAttribute("contenteditable"))showPreview(i);
+    });
+
+    els.previewBody.appendChild(tr);
+  }
+
+  updateStats();
+}
+
+els.virtualContainer.addEventListener("scroll",()=>requestAnimationFrame(renderVirtualTable));
+
+function addRowToTable(row){
+  rows.push(row);
+  if(rows.length<=visibleEnd)renderVirtualTable();
+}
+
+/* =========================================================== ПРЕДОБРАБОТКА =========================================================== */
+async function fileToImageBitmap(file){const u=URL.createObjectURL(file);const img=await createImageBitmap(await(await fetch(u)).blob());URL.revokeObjectURL(u);return img;}
+
+function getExifOrientation(buf){try{const v=new DataView(buf);if(v.getUint16(0,false)!==0xFFD8)return 1;let o=2;while(o<v.byteLength){const m=v.getUint16(o,false);o+=2;if(m===0xFFE1){o+=2;if(v.getUint32(o,false)!==0x45786966)return 1;o+=6;const l=v.getUint16(o,false)===0x4949;o+=2;if(v.getUint16(o,l)!==0x002A)return 1;o+=2;let d=v.getUint32(o,l);o=o-4+d;const n=v.getUint16(o,l);o+=2;for(let i=0;i<n;i++){const t=v.getUint16(o+i*12,l);if(t===0x0112)return v.getUint16(o+i*12+8,l)||1;}return 1;}else{const len=v.getUint16(o,false);o+=len;}}}catch(e){}return 1;}
+
+function drawWithOrientation(ctx,img,w,h,o){switch(o){case 2:ctx.translate(w,0);ctx.scale(-1,1);break;case 3:ctx.translate(w,h);ctx.rotate(Math.PI);break;case 4:ctx.translate(0,h);ctx.scale(1,-1);break;case 6:ctx.rotate(0.5*Math.PI);ctx.translate(0,-h);break;case 8:ctx.rotate(-0.5*Math.PI);ctx.translate(-w,0);break;}ctx.drawImage(img,0,0,w,h);}
+
+async function preprocessToBlob(file){
+  const ab=await file.arrayBuffer();
+  const o=getExifOrientation(ab)||1;
+  const img=await fileToImageBitmap(new File([ab],file.name,{type:file.type}));
+  const targetW=1800,scale=targetW/img.width,W=Math.round(img.width*scale),H=Math.round(img.height*scale);
+  const rot90=[5,6,7,8].includes(o),cw=rot90?H:W,ch=rot90?W:H;
+  const cvs=new OffscreenCanvas(cw,ch),ctx=cvs.getContext("2d",{willReadFrequently:true});
+  ctx.save();drawWithOrientation(ctx,img,W,H,o);ctx.restore();
+
+  let imgData=ctx.getImageData(0,0,cw,ch);
+  const d=imgData.data,hist=new Uint32Array(256);
+  for(let i=0;i<d.length;i+=4){const y=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])|0;d[i]=d[i+1]=d[i+2]=y;d[i+3]=255;hist[y]++;}
+
+  function percentile(p){const tgt=p*(cw*ch);let acc=0;for(let i=0;i<256;i++){acc+=hist[i];if(acc>=tgt)return i;}return p===0?0:255;}
+  const lo=percentile(0.02),hi=percentile(0.98),span=Math.max(1,hi-lo);
+  for(let i=0;i<d.length;i+=4){let y=d[i];y=((y-lo)*255/span)|0;if(y<0)y=0;if(y>255)y=255;d[i]=d[i+1]=d[i+2]=y;}
+
+  const hist2=new Uint32Array(256);
+  for(let i=0;i<d.length;i+=4)hist2[d[i]]++;
+  let sum=0,sumB=0,wB=0,wF=0,maxVar=0,thr=127;
+  for(let i=0;i<256;i++)sum+=i*hist2[i];
+  const total=cw*ch;
+  for(let t=0;t<256;t++){wB+=hist2[t];if(wB===0)continue;wF=total-wB;if(wF===0)break;sumB+=t*hist2[t];const mB=sumB/wB,mF=(sum-sumB)/wF,between=wB*wF*(mB-mF)*(mB-mF);if(between>maxVar){maxVar=between;thr=t;}}
+  for(let i=0;i<d.length;i+=4){const val=d[i]>thr?255:0;d[i]=d[i+1]=d[i+2]=val;}
+
+  ctx.putImageData(imgData,0,0);
+  return await cvs.convertToBlob({type:"image/png",quality:1});
+}
+
+/* =========================================================== ПАРСИНГ =========================================================== */
+const PHONE_RE=/(\+7|8)\s*\(?\s*\d{3}\s*\)?\s*[-\s]?\d{3}[-\s]?\d{2}[-\s]?\d{2}/g;
+function cleanNoise(t){return(t||"").replace(/[•●◦∙·©®™]/g," ").replace(/фио[:\s]*/gi," ").replace(/физлицо|mobile/gi," ").replace(/[—–]+/g,"-").replace(/[\u200E\u200F\u00A0]/g," ").replace(/\s{2,}/g," ").trim();}
+function normalizePhone(r){const d=r.match(/\d/g)?.join("")||"";if(d.length<10)return r.trim();let dd=d;if(dd.length===11&&dd[0]==="8")dd="7"+dd.slice(1);if(dd.length!==11)return r.trim();return"+7 "+dd.slice(1,4)+" "+dd.slice(4,7)+"-"+dd.slice(7,9)+"-"+dd.slice(9,11);}
+function parsePhones(t){const seen=new Set(),list=[];for(const m of(t||"").matchAll(PHONE_RE)){const ph=normalizePhone(m[0]),key=ph.replace(/\D/g,"");if(!seen.has(key)){seen.add(key);list.push(ph);}}return list.join(", ");}
+
+function toCyrLookalikes(s){const map={A:"А",B:"В",C:"С",E:"Е",H:"Н",K:"К",M:"М",O:"О",P:"Р",T:"Т",X:"Х",Y:"У",a:"а",b:"в",c:"с",e:"е",h:"н",k:"к",m:"м",o:"о",p:"р",t:"т",x:"х",y:"у"};return s.replace(/[ABCEHKMOPTXYabcehkmoptxy]/g,ch=>map[ch]||ch);}
+function fixCyrConfusions(w){let ww=toCyrLookalikes(w);ww=ww.replace(/Шщ|ШЩ/g,"Щ").replace(/шщ|шЩ/g,"щ").replace(/ЙИ/gu,"И").replace(/йи/gu,"и").replace(/З3/g,"З").replace(/з3/g,"з").replace(/^[\.\-]+|[\.\-]+$/g,"");return ww;}
+function titlecaseRu(s){return s.trim().split(/\s+/).map(p=>p?p[0].toUpperCase()+p.slice(1).toLowerCase():p).join(" ");}
+
+function parseFio(text){
+  const t=cleanNoise(text);
+  const tokens=t.split(/[^А-Яа-яЁё-]+/).map(w=>w&&fixCyrConfusions(w)).filter(w=>w&&w.length>=2);
+  const stop=/^(россия|город|улица|ул|область|край|район|рф|регион)$/i;
+  for(let i=0;i<tokens.length-1;i++){
+    const a=tokens[i],b=tokens[i+1],c=tokens[i+2];
+    if(stop.test(a))continue;
+    const aC=correctWord(a,"surname"),bC=correctWord(b,"name"),cC=c?correctWord(c,"name"):null;
+    if(c&&a.length>=3&&b.length>=3&&c.length>=3)return titlecaseRu(`${aC} ${bC} ${cC}`);
+    if(a.length>=3&&b.length>=3)return titlecaseRu(`${aC} ${bC}`);
+  }
+  return "";
+}
+
+function isPhoneish(ln){const d=(ln||"").replace(/\D/g,"");return/\+/.test(ln)||d.length>=10;}
+
+function parseAddressComponents(text){
+  const result={region:"",city:"",street:"",building:"",fullAddress:""};
+  const t=(text||"").replace(/\r/g,"");
+  const start=t.search(/Россия|РФ/i);
+  if(start<0)return result;
+  let tail=t.slice(start).replace(/^РФ/i,"Россия");
+  let parts=tail.split(/\n/).map(s=>s.trim()).filter(Boolean);
+  const limited=[];
+  for(let i=0;i<parts.length&&i<6;i++){
+    const ln=parts[i];
+    if(isPhoneish(ln))continue;
+    if(/фио|mobile|мобил|заказ|телеф|клиент|получател/iu.test(ln))continue;
+    limited.push(ln);
+  }
+  result.fullAddress=limited.join(", ").replace(/^Россия(?!\s*,)/i,"Россия,").replace(/\s*,\s*,/g,", ").replace(/\s{2,}/g," ").replace(/,\s*$/,"").trim();
+
+  const fl=limited[0]||"";
+  const regMatch=fl.match(/,\s*([^,]+?(?:область|обл\.?|край|республика|респ\.?))/i);
+  if(regMatch)result.region=regMatch[1].trim();
+  const cityMatch=fl.match(/,\s*(?:г\.?\s+)?([А-ЯЁ][а-яё\-\s]+?)(?=\s*,|$)/i);
+  if(cityMatch){let cand=cityMatch[1].trim();if(!/область|обл\.|край|республика|респ\./i.test(cand))result.city=cand.replace(/^г\.?\s*/i,"");}
+
+  const streetLine=limited.find(ln=>/(?:ул\.?|улица|просп\.?|проспект|пер\.?|переулок|шоссе|ш\.|б-р|бульвар)/i.test(ln));
+  if(streetLine){
+    const stMatch=streetLine.match(/((?:ул\.?|улица|просп\.?|проспект|пер\.?|переулок|шоссе|ш\.|б-р|бульвар)\s+[^,\d]+)/i);
+    if(stMatch){let sn=stMatch[1].trim().replace(/^(ул\.?|улица|просп\.?|проспект|пер\.?|переулок)\s+/i,"");const corr=correctWord(sn,"street");if(corr!==sn)sn=corr;result.street=sn;}
+    const buildMatch=streetLine.match(/(?:д\.?|дом)\s*(\d+[а-яА-Я]?)(?:[,\s]+(?:кв\.?|квартира)\s*(\d+))?/i);
+    if(buildMatch){const house=buildMatch[1],apt=buildMatch[2];result.building=apt?`д.${house}, кв.${apt}`:`д.${house}`;}
+  }
+  return result;
+}
+
+function parseOrder(raw,filename){
+  const cleaned=cleanNoise(raw);
+  const phone=parsePhones(cleaned);
+  const fio=parseFio(cleaned);
+  const addr=parseAddressComponents(cleaned);
+  return {"Файл":filename,"ФИО":fio,"Телефон":phone,"Регион":addr.region,"Город":addr.city,"Улица":addr.street,"Дом/Кв":addr.building,"Адрес (полный)":addr.fullAddress||"","Raw OCR":raw.trim()};
+}
+
+/* =========================================================== ДЕДУПЛИКАЦИЯ =========================================================== */
+function deduplicateRows(){
+  const seen=new Map();
+  let dupeCount=0;
+  rows.forEach(r=>{
+    r._duplicate=false;
+    const key=`${r["Телефон"]||""}|${r["Город"]||""}|${r["Улица"]||""}`.toLowerCase();
+    if(key!=="||"&&seen.has(key)){r._duplicate=true;dupeCount++;}
+    else seen.set(key,true);
+  });
+  log(`🔗 Дедупликация: найдено ${dupeCount} дубликатов`);
+  renderVirtualTable();
+}
+
+els.dedupeBtn.addEventListener("click",deduplicateRows);
+
+/* =========================================================== АНАЛИТИКА =========================================================== */
+function generateAnalytics(){
+  const cities={},regions={},errors=[];
+  rows.forEach(r=>{
+    const city=r["Город"];
+    const region=r["Регион"];
+    if(city)cities[city]=(cities[city]||0)+1;
+    if(region)regions[region]=(regions[region]||0)+1;
+    if(!r["ФИО"]||!r["Телефон"]||!r["Адрес (полный)"])errors.push(r["Файл"]);
+  });
+
+  const topCities=Object.entries(cities).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const topRegions=Object.entries(regions).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  return {cities:topCities,regions:topRegions,errors:errors.slice(0,10),total:rows.length};
+}
+
+function showAnalytics(){
+  const analytics=generateAnalytics();
+  const content=document.getElementById('analyticsContent');
+  content.innerHTML=`
+    <div class="analytics-section">
+      <div class="analytics-title">Топ-10 городов</div>
+      <div class="analytics-list">
+        ${analytics.cities.map(([city,count])=>`<div class="analytics-list-item"><span>${city}</span><span>${count}</span></div>`).join('')}
+      </div>
+    </div>
+    <div class="analytics-section" style="margin-top:12px;">
+      <div class="analytics-title">Топ-5 регионов</div>
+      <div class="analytics-list">
+        ${analytics.regions.map(([reg,count])=>`<div class="analytics-list-item"><span>${reg}</span><span>${count}</span></div>`).join('')}
+      </div>
+    </div>
+    <div class="analytics-section" style="margin-top:12px;">
+      <div class="analytics-title">Файлы с ошибками (${analytics.errors.length})</div>
+      <div class="analytics-list" style="font-size:11px;">
+        ${analytics.errors.map(f=>`<div>${f}</div>`).join('')}
+      </div>
+    </div>
+  `;
+  document.getElementById('analyticsTab').style.display='block';
+  document.getElementById('previewTab').style.display='none';
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelector('[data-tab="analytics"]').classList.add('active');
+  els.sidePanel.classList.remove('hidden');
+}
+
+els.analyticsBtn.addEventListener("click",showAnalytics);
+
+function showDetailedAnalytics(){
+  const analytics=generateAnalytics();
+  const modal=document.getElementById('analyticsModal');
+  const content=document.getElementById('analyticsModalContent');
+  content.innerHTML=`
+    <div class="analytics-grid">
+      <div class="analytics-section">
+        <div class="analytics-title">📍 Топ-10 городов</div>
+        <div class="analytics-list">
+          ${analytics.cities.map(([c,n])=>`<div class="analytics-list-item"><span>${c}</span><span><strong>${n}</strong></span></div>`).join('')}
+        </div>
+      </div>
+      <div class="analytics-section">
+        <div class="analytics-title">🗺️ Топ-5 регионов</div>
+        <div class="analytics-list">
+          ${analytics.regions.map(([r,n])=>`<div class="analytics-list-item"><span>${r}</span><span><strong>${n}</strong></span></div>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="analytics-section" style="margin-top:16px;">
+      <div class="analytics-title">⚠️ Файлы с неполными данными (${analytics.errors.length})</div>
+      <div class="analytics-list" style="font-size:11px; max-height:200px; overflow:auto;">
+        ${analytics.errors.map(f=>`<div style="padding:2px 0;">${f}</div>`).join('')||'<div>Нет ошибок</div>'}
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+}
+
+document.getElementById('closeAnalyticsBtn').addEventListener('click',()=>{
+  document.getElementById('analyticsModal').classList.remove('active');
+});
+
+/* =========================================================== ШАБЛОНЫ =========================================================== */
+const defaultTemplate={name:"По умолчанию",description:"Стандартный парсер",config:{}};
+
+async function loadTemplates(){
+  const templates=await db.getAll('templates');
+  return templates.length>0?templates:[defaultTemplate];
+}
+
+async function saveTemplate(template){
+  if(template.id)await db.put('templates',template);
+  else await db.add('templates',template);
+}
+
+async function showTemplates(){
+  const templates=await loadTemplates();
+  const list=document.getElementById('templateList');
+  list.innerHTML=templates.map(t=>`
+    <div class="template-item ${t.id===currentTemplate?.id?'active':''}" data-id="${t.id||0}">
+      <div class="template-name">${t.name}</div>
+      <div style="margin-left:auto; display:flex; gap:4px;">
+        <button class="btn secondary" onclick="editTemplate(${t.id||0})">✏️</button>
+        <button class="btn secondary" onclick="exportTemplate(${t.id||0})">📤</button>
+        ${t.id?`<button class="btn secondary" onclick="deleteTemplate(${t.id})">🗑️</button>`:''}
+      </div>
+    </div>
+  `).join('');
+  document.getElementById('templatesModal').classList.add('active');
+}
+
+window.editTemplate=async function(id){
+  const templates=await loadTemplates();
+  const tpl=templates.find(t=>t.id===id)||defaultTemplate;
+  document.getElementById('templateName').value=tpl.name;
+  document.getElementById('templateDesc').value=tpl.description||'';
+  document.getElementById('templateJson').value=JSON.stringify(tpl.config,null,2);
+  document.getElementById('templateEditorModal').classList.add('active');
+  document.getElementById('templateEditorModal').dataset.editId=id||'';
+};
+
+window.exportTemplate=async function(id){
+  const templates=await loadTemplates();
+  const tpl=templates.find(t=>t.id===id);
+  if(!tpl)return;
+  const blob=new Blob([JSON.stringify(tpl,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`template_${tpl.name}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  log(`📤 Экспорт шаблона: ${tpl.name}`);
+};
+
+window.deleteTemplate=async function(id){
+  if(!confirm('Удалить шаблон?'))return;
+  await db.delete('templates',id);
+  log(`🗑️ Удален шаблон ID:${id}`);
+  showTemplates();
+};
+
+els.templatesBtn.addEventListener('click',showTemplates);
+document.getElementById('closeTemplatesBtn').addEventListener('click',()=>{
+  document.getElementById('templatesModal').classList.remove('active');
+});
+
+document.getElementById('addTemplateBtn').addEventListener('click',()=>{
+  document.getElementById('templateName').value='';
+  document.getElementById('templateDesc').value='';
+  document.getElementById('templateJson').value='{}';
+  document.getElementById('templateEditorModal').classList.add('active');
+  document.getElementById('templateEditorModal').dataset.editId='';
+});
+
+document.getElementById('saveTemplateBtn').addEventListener('click',async()=>{
+  const name=document.getElementById('templateName').value.trim();
+  const desc=document.getElementById('templateDesc').value.trim();
+  const jsonStr=document.getElementById('templateJson').value.trim();
+  if(!name){alert('Введите название');return;}
+
+  let config;
+  try{config=JSON.parse(jsonStr);}catch(e){alert('Ошибка JSON');return;}
+
+  const editId=document.getElementById('templateEditorModal').dataset.editId;
+  const tpl={name,description:desc,config};
+  if(editId)tpl.id=parseInt(editId);
+
+  await saveTemplate(tpl);
+  log(`💾 Сохранен шаблон: ${name}`);
+  document.getElementById('templateEditorModal').classList.remove('active');
+  showTemplates();
+});
+
+document.getElementById('cancelTemplateBtn').addEventListener('click',()=>{
+  document.getElementById('templateEditorModal').classList.remove('active');
+});
+
+document.getElementById('importTemplateBtn').addEventListener('click',()=>{
+  const input=document.createElement('input');
+  input.type='file';
+  input.accept='.json';
+  input.onchange=async(e)=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    const text=await file.text();
+    try{
+      const tpl=JSON.parse(text);
+      delete tpl.id;
+      await saveTemplate(tpl);
+      log(`📥 Импорт шаблона: ${tpl.name}`);
+      showTemplates();
+    }catch(err){alert('Ошибка импорта');}
+  };
+  input.click();
+});
+
+/* =========================================================== ИСТОРИЯ СЕССИЙ =========================================================== */
+async function saveSession(){
+  const session={
+    timestamp:Date.now(),
+    date:new Date().toLocaleString('ru-RU'),
+    rows:rows,
+    files:filesList.length,
+    template:currentTemplate?.name||'По умолчанию'
+  };
+  const id=await db.add('sessions',session);
+  log(`💾 Сессия сохранена ID:${id}`);
+  return id;
+}
+
+async function loadSession(id){
+  const session=await db.get('sessions',id);
+  if(!session)return;
+  rows=session.rows||[];
+  renderVirtualTable();
+  log(`📂 Загружена сессия: ${session.date}`);
+  document.getElementById('historyModal').classList.remove('active');
+  els.saveBtn.disabled=false;
+  els.reparseBtn.disabled=false;
+  els.analyticsBtn.disabled=false;
+  els.dedupeBtn.disabled=false;
+  els.exportMenuBtn.disabled=false;
+}
+
+async function showHistory(){
+  const sessions=await db.getAll('sessions');
+  const list=document.getElementById('historyList');
+  if(sessions.length===0){
+    list.innerHTML='<div class="muted">История пуста</div>';
+  }else{
+    list.innerHTML=sessions.reverse().map(s=>`
+      <div class="history-item" onclick="loadSession(${s.id})">
+        <div class="history-title">${s.date}</div>
+        <div class="history-meta">📄 ${s.files} файлов | 📊 ${s.rows.length} строк | 📋 ${s.template}</div>
+      </div>
+    `).join('');
+  }
+  document.getElementById('historyModal').classList.add('active');
+}
+
+window.loadSession=loadSession;
+
+els.historyBtn.addEventListener('click',showHistory);
+document.getElementById('closeHistoryBtn').addEventListener('click',()=>{
+  document.getElementById('historyModal').classList.remove('active');
+});
+
+document.getElementById('exportSessionBtn').addEventListener('click',async()=>{
+  const sessionId=await saveSession();
+  const session=await db.get('sessions',sessionId);
+  const blob=new Blob([JSON.stringify(session,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`session_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  log(`📤 Экспорт сессии`);
+});
+
+document.getElementById('importSessionBtn').addEventListener('click',()=>{
+  const input=document.createElement('input');
+  input.type='file';
+  input.accept='.json';
+  input.onchange=async(e)=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    const text=await file.text();
+    try{
+      const session=JSON.parse(text);
+      delete session.id;
+      const id=await db.add('sessions',session);
+      log(`📥 Импорт сессии ID:${id}`);
+      showHistory();
+    }catch(err){alert('Ошибка импорта');}
+  };
+  input.click();
+});
+
+/* =========================================================== ЭКСПОРТ CSV/JSON =========================================================== */
+function exportCSV(){
+  const encoding=document.getElementById('csvEncoding').value;
+  const delimiter=document.getElementById('csvDelimiter').value;
+  const header=COLS.join(delimiter);
+  const csvRows=[header];
+  rows.forEach(r=>{
+    const vals=COLS.map(k=>{
+      let val=(r[k]||"").toString().replace(/"/g,'""');
+      if(val.includes(delimiter)||val.includes('"')||val.includes('\n'))val=`"${val}"`;
+      return val;
+    });
+    csvRows.push(vals.join(delimiter));
+  });
+
+  const csvString=csvRows.join('\n');
+  let blob;
+  if(encoding==='windows-1251'){
+    const encoder=new TextEncoder();
+    const utf8=encoder.encode(csvString);
+    blob=new Blob([utf8],{type:'text/csv;charset=windows-1251'});
+  }else{
+    blob=new Blob(['\uFEFF'+csvString],{type:'text/csv;charset=utf-8'});
+  }
+
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`orders_${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  log(`📄 Экспорт CSV (${encoding})`);
+}
+
+function exportJSON(){
+  const json=JSON.stringify(rows,null,2);
+  const blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`orders_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  log(`📋 Экспорт JSON`);
+}
+
+document.getElementById('exportCsvBtn').addEventListener('click',exportCSV);
+document.getElementById('exportJsonBtn').addEventListener('click',exportJSON);
+
+/* =========================================================== OCR =========================================================== */
+const EXT_OK=/\.(jpg|jpeg|png|webp|bmp|gif|tif|tiff|heic)$/i;
+function isImageFile(f){return(f.type&&f.type.startsWith("image/"))||EXT_OK.test(f.name);}
+
+function setFiles(list){
+  const arr=Array.from(list||[]);
+  filesList=arr.filter(isImageFile);
+  rows=[];
+  renderVirtualTable();
+  processedBlobs.clear();
+  els.sidePanel.classList.add('hidden');
+  prog(0);
+  els.runBtn.disabled=filesList.length===0;
+  els.reparseBtn.disabled=true;
+  els.saveBtn.disabled=true;
+  els.dedupeBtn.disabled=true;
+  els.analyticsBtn.disabled=true;
+  els.exportMenuBtn.disabled=true;
+  updateStats();
+  log(`📁 Принято файлов: ${filesList.length}`);
+}
+
+els.fileInput.addEventListener("change",e=>setFiles(e.target.files));
+els.dirInput.addEventListener("change",e=>setFiles(e.target.files));
+
+const dropZone=document.getElementById("dropZone");
+dropZone.addEventListener("dragover",e=>{e.preventDefault();dropZone.classList.add("dragover");});
+dropZone.addEventListener("dragleave",()=>dropZone.classList.remove("dragover"));
+dropZone.addEventListener("drop",e=>{e.preventDefault();dropZone.classList.remove("dragover");setFiles(e.dataTransfer.files);});
+
+async function createWorkerSafe(){
+  setStatus("Загрузка OCR...");
+  setProgressLabel("Инициализация Tesseract...");
+  log("📦 Загрузка rus+eng...");
+  const worker=await Tesseract.createWorker("rus+eng",1,{
+    langPath:"https://tessdata.projectnaptha.com/4.0.0",
+    logger:m=>{
+      if(m.status==='loading language')setProgressLabel(`Язык: ${Math.round(m.progress*100)}%`);
+      else if(m.status==='initializing api')setProgressLabel(`API: ${Math.round(m.progress*100)}%`);
+    }
+  });
+  setProgressLabel("");
+  return worker;
+}
+
+async function recognizeWithFallback(worker,blob){
+  const base=await worker.recognize(blob,{tessedit_pageseg_mode:"6"});
+  let text=base?.data?.text||"";
+  if(!parsePhones(text)){
+    try{
+      const cfg={tessedit_pageseg_mode:"6",tessedit_char_whitelist:"+() -0123456789"};
+      const phonePass=await worker.recognize(blob,cfg);
+      const p=parsePhones(phonePass?.data?.text||"");
+      if(p)text=(text+"\n"+p).trim();
+    }catch(e){}
+  }
+  return text;
+}
+
+async function runOCR(){
+  if(typeof Tesseract==="undefined"){alert("Tesseract не загружен");return;}
+  if(!filesList.length){alert("Добавьте изображения");return;}
+
+  els.runBtn.disabled=true;
+  els.reparseBtn.disabled=true;
+  els.saveBtn.disabled=true;
+  els.cancelBtn.disabled=false;
+  rows=[];
+  renderVirtualTable();
+  prog(1);
+  setStatus("Подготовка...");
+  els.log.textContent="";
+  processedBlobs.clear();
+  els.sidePanel.classList.add('hidden');
+
+  cancelFlag=false;
+  let processed=0;
+  const total=filesList.length;
+  const conc=2;
+  const startTime=Date.now();
+
+  log(`🏢 v4.0 Enterprise: шаблоны, дедупликация, аналитика`);
+  log(`Файлов: ${total}, параллельность: ${conc}`);
+
+  const workers=[];
+  try{
+    for(let i=0;i<conc;i++)workers.push(await createWorkerSafe());
+    log(`✅ Воркеров: ${workers.length}`);
+  }catch(e){
+    alert("Ошибка загрузки языков");
+    setStatus("Ошибка");
+    els.runBtn.disabled=false;
+    els.cancelBtn.disabled=true;
+    return;
+  }
+
+  const priorityTasks=filesList.slice(0,5).map((file,idx)=>({file,idx,priority:true}));
+  const backgroundTasks=filesList.slice(5).map((file,idx)=>({file,idx:idx+5,priority:false}));
+  const tasks=[...priorityTasks,...backgroundTasks];
+  const results=new Array(total);
+
+  async function processTask(worker,task){
+    if(cancelFlag)return;
+    const{file,idx,priority}=task;
+    try{
+      setStatus(`${priority?'⚡':'📦'} Предобработка: ${idx+1}/${total}`);
+      const blob=await preprocessToBlob(file);
+      const blobURL=URL.createObjectURL(blob);
+      processedBlobs.set(file.name,blobURL);
+
+      setStatus(`${priority?'⚡':'📦'} OCR: ${idx+1}/${total}`);
+      const txt=await recognizeWithFallback(worker,blob);
+
+      const row=parseOrder(txt,file.name);
+      results[idx]=row;
+      addRowToTable(row);
+    }catch(err){
+      results[idx]={"Файл":file.name,"ФИО":"","Телефон":"","Регион":"","Город":"","Улица":"","Дом/Кв":"","Адрес (полный)":"","Raw OCR":"Ошибка: "+(err.message||err)};
+      log(`❌ ${file.name}: ${err.message}`);
+    }finally{
+      processed++;
+      prog(Math.round((processed/total)*100));
+      const elapsed=((Date.now()-startTime)/1000).toFixed(1);
+      const speed=(processed/(Date.now()-startTime)*1000*60).toFixed(1);
+      setStatus(`Готово: ${processed}/${total}`);
+      els.statSpeed.textContent=`${speed} ф/м`;
+      updateStats();
+    }
+  }
+
+  let cursor=0;
+  async function workerLoop(worker){
+    while(!cancelFlag&&cursor<tasks.length){
+      const myTask=tasks[cursor++];
+      await processTask(worker,myTask);
+    }
+  }
+
+  await Promise.all(workers.map(w=>workerLoop(w))).catch(()=>{});
+  for(const w of workers){try{await w.terminate();}catch(e){}}
+
+  if(cancelFlag){
+    setStatus("Остановлено");
+    log("⏸️ Обработка остановлена");
+    els.runBtn.disabled=false;
+    els.cancelBtn.disabled=true;
+    return;
+  }
+
+  rows=results.filter(Boolean);
+  renderVirtualTable();
+
+  const totalTime=((Date.now()-startTime)/1000).toFixed(1);
+  setStatus(`✅ Готово за ${totalTime}s`);
+  log(`✅ Обработано: ${rows.length} файлов за ${totalTime}s`);
+
+  await saveSession();
+
+  els.saveBtn.disabled=false;
+  els.reparseBtn.disabled=false;
+  els.analyticsBtn.disabled=false;
+  els.dedupeBtn.disabled=false;
+  els.exportMenuBtn.disabled=false;
+  els.runBtn.disabled=false;
+  els.cancelBtn.disabled=true;
+  updateStats();
+}
+
+els.runBtn.addEventListener("click",runOCR);
+els.cancelBtn.addEventListener("click",()=>{cancelFlag=true;els.cancelBtn.disabled=true;});
+
+/* =========================================================== ПЕРЕПАРСИНГ =========================================================== */
+els.reparseBtn.addEventListener("click",()=>{
+  if(rows.length===0)return;
+  log("🔄 Перепарсинг...");
+  setStatus("Перепарсинг...");
+  rows=rows.map(r=>parseOrder(r["Raw OCR"]||"",r["Файл"]||""));
+  renderVirtualTable();
+  setStatus("✅ Перепарсинг завершен");
+  log(`✅ Перепарсено: ${rows.length}`);
+});
+
+/* =========================================================== ТАБЛИЦА =========================================================== */
+function syncRowsFromTable(){
+  document.querySelectorAll("#preview tbody tr").forEach(tr=>{
+    const idx=parseInt(tr.dataset.index);
+    if(idx>=0&&idx<rows.length){
+      const tds=tr.querySelectorAll("td");
+      COLS.forEach((k,i)=>{if(tds[i])rows[idx][k]=tds[i].textContent.trim();});
+    }
+  });
+}
+
+document.getElementById('clearColBtn').addEventListener("click",()=>{
+  const idx=document.getElementById('colSelect').selectedIndex;
+  if(idx===0){alert("Столбец Файл очищать нельзя");return;}
+  rows.forEach(r=>r[COLS[idx]]="");
+  renderVirtualTable();
+});
+
+document.getElementById('fillDownBtn').addEventListener("click",()=>{
+  const idx=document.getElementById('colSelect').selectedIndex;
+  if(idx===0){alert("Столбец Файл копировать вниз не имеет смысла");return;}
+  if(rows.length<2)return;
+  const base=rows[0][COLS[idx]];
+  const val=base||prompt("Введите значение:","");
+  if(val===null)return;
+  for(let i=1;i<rows.length;i++)rows[i][COLS[idx]]=val;
+  renderVirtualTable();
+});
+
+els.previewBody.addEventListener("input",()=>syncRowsFromTable());
+
+/* =========================================================== ПРЕВЬЮ =========================================================== */
+function showPreview(rowIndex){
+  const row=rows[rowIndex];
+  if(!row)return;
+  const filename=row["Файл"];
+  const blobURL=processedBlobs.get(filename);
+  if(!blobURL){els.sidePanel.classList.add("hidden");return;}
+
+  els.sidePanel.classList.remove("hidden");
+  els.previewImg.src=blobURL;
+  els.previewData.innerHTML=`
+    <dt>Файл:</dt><dd>${filename}</dd>
+    <dt>ФИО:</dt><dd>${row["ФИО"]||"<пусто>"}</dd>
+    <dt>Телефон:</dt><dd>${row["Телефон"]||"<пусто>"}</dd>
+    <dt>Регион:</dt><dd>${row["Регион"]||"<пусто>"}</dd>
+    <dt>Город:</dt><dd>${row["Город"]||"<пусто>"}</dd>
+    <dt>Улица:</dt><dd>${row["Улица"]||"<пусто>"}</dd>
+    <dt>Дом/Кв:</dt><dd>${row["Дом/Кв"]||"<пусто>"}</dd>
+    <dt>Raw OCR:</dt><dd style="font-size:11px; max-height:100px; overflow:auto;">${row["Raw OCR"]?.substring(0,300)||"<пусто>"}</dd>
+  `;
+
+  document.querySelectorAll("#preview tbody tr").forEach((tr,idx)=>{
+    const trIndex=parseInt(tr.dataset.index);
+    tr.classList.toggle("selected",trIndex===rowIndex);
+  });
+
+  document.getElementById('previewTab').style.display='block';
+  document.getElementById('analyticsTab').style.display='none';
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelector('[data-tab="preview"]').classList.add('active');
+}
+
+/* =========================================================== EXCEL =========================================================== */
+function saveExcel(){
+  syncRowsFromTable();
+  if(!rows.length){alert("Нечего сохранять");return;}
+  const ws=XLSX.utils.json_to_sheet(rows,{header:COLS});
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Orders");
+  const timestamp=new Date().toISOString().slice(0,19).replace(/:/g,"-");
+  XLSX.writeFile(wb,`orders_v4_${timestamp}.xlsx`);
+  log(`💾 Excel: orders_v4_${timestamp}.xlsx`);
+}
+
+els.saveBtn.addEventListener("click",saveExcel);
+
+/* =========================================================== INIT =========================================================== */
+(async()=>{
+  await db.init();
+  updateStats();
+  log("🏢 OCR v4.0 Enterprise загружен");
+  log("✨ Шаблоны, дедупликация, аналитика, CSV/JSON, история");
+  log("Выберите файлы и нажмите 'Распознать'");
+})();
+
+setInterval(updateStats,5000);
+</script>
+</body>
+</html>
