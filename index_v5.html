@@ -901,8 +901,8 @@ cards = response.json()['cards']</pre>
             const orderMatch = text.match(/№?\s*(\d{4,})/);
             if (orderMatch) orderNumber = orderMatch[1];
 
-            // Поиск телефона
-            const phoneMatch = text.match(/\+?[78][\s-]?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}/);
+            // Поиск телефона (с префиксом +7/8 или без)
+            const phoneMatch = text.match(/(\+?[78][\s-]?)?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}/);
             if (phoneMatch) phoneNumber = phoneMatch[0];
 
             return {
